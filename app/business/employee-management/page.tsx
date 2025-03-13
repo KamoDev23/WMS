@@ -1,3 +1,4 @@
+//app/business/employee-management/page.tsx
 "use client";
 import React, { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
@@ -22,8 +23,13 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { useRouter } from "next/navigation";
-import { collection, getDocs, addDoc } from "firebase/firestore";
+import { collection, getDocs, addDoc, getDoc, doc } from "firebase/firestore";
 import { db } from "@/firebase/firebase-config";
+import { useAuth } from "@/context/auth-context";
+import { addEmployee, fetchEmployees } from "@/lib/employee-utils";
+import { Separator } from "@/components/ui/separator";
+import { set } from "date-fns";
+import { Loader2 } from "lucide-react";
 
 interface Employee {
   id: string;
@@ -34,11 +40,15 @@ interface Employee {
 }
 
 export default function EmployeeManagementPage() {
+  const { user } = useAuth();
+  const [merchantCode, setMerchantCode] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 5;
   const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [savingEmployee, setSavingEmployee] = useState(false);
 
   // Dialog state and fields for adding a new employee
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -50,69 +60,107 @@ export default function EmployeeManagementPage() {
     role: "",
   });
 
-  // Fetch employees from Firestore
-  const fetchEmployees = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "businessEmployees"));
-      const fetched: Employee[] = [];
-      querySnapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Omit<Employee, "id">;
-        fetched.push({ id: docSnap.id, ...data });
-      });
-      setEmployees(fetched);
-    } catch (error) {
-      console.error("Error fetching employees:", error);
-    }
-  };
+ 
 
   useEffect(() => {
-    fetchEmployees();
-  }, []);
+    if (!user) return;
+  
+    const loadEmployees = async () => {
+      try {
+        const userDoc = await getDocs(collection(db, "users"));
+        const userData = userDoc.docs.find((doc) => doc.id === user.uid)?.data();
+  
+        if (!userData || !userData.merchantCode) {
+          console.error("Merchant code not found.");
+          return;
+        }
+  
+        setMerchantCode(userData.merchantCode);
+  
+        // Fetch merchant data to get company name
+        const merchantDoc = await getDoc(doc(db, "merchants", userData.merchantCode));
+        const merchantData = merchantDoc.data();
+        const companyName = merchantData?.companyName || "ROC";
+        
+        // Fetch Employees
+        const employeesData = await fetchEmployees(userData.merchantCode);
+        setEmployees(employeesData);
+      } catch (error) {
+        console.error("Error loading employees:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+  
+    loadEmployees();
+  }, [user]);
 
   // Improved Employee ID Generation
-  const generateEmployeeId = () => {
+  const generateEmployeeId = (companyName : any) => {
+    // Get first 3 letters of company name and capitalize them
+    const prefix = companyName.substring(0, 3).toUpperCase();
+    
+    // Find highest sequence number
     let maxSeq = 0;
     employees.forEach((emp) => {
-      const match = emp.id.match(/ROC-(\d{3})/);
+      const match = emp.id.match(/[A-Z]{3}-(\d{3})/);
       if (match) {
         const seq = parseInt(match[1], 10);
         if (seq > maxSeq) maxSeq = seq;
       }
     });
-    return `ROC-${(maxSeq + 1).toString().padStart(3, "0")}`;
+    
+    // Format: [3 letters]-[3 digit number]
+    return `${prefix}-${(maxSeq + 1).toString().padStart(3, '0')}`;
   };
 
   // Handle adding a new employee: save to Firestore then update local state
   const handleAddEmployee = async (e: React.FormEvent) => {
+    setSavingEmployee(true);
     e.preventDefault();
+    if (!merchantCode) return;
+  
     try {
-      const employeeId = generateEmployeeId();
-      const employeeToAdd = {
-        employeeId: employeeId,
+      // Get company name for ID generation
+      const merchantDoc = await getDoc(doc(db, "merchants", merchantCode));
+      const merchantData = merchantDoc.data();
+      const companyName = merchantData?.companyName || "ROC";
+      
+      // Generate employee ID
+      const employeeId = generateEmployeeId(companyName);
+      
+      // Add the employee with the generated ID
+      const addedEmployee = await addEmployee(merchantCode, {
+        id: employeeId, // Use the generated ID
         firstName: newEmployee.firstName,
         lastName: newEmployee.lastName,
         idNumber: newEmployee.idNumber,
         role: newEmployee.role,
-      };
-      const docRef = await addDoc(
-        collection(db, "businessEmployees"),
-        employeeToAdd
-      );
-      // Here we use Firestore's generated id for now, or you can update it later with employeeId.
-      const newEmp: Employee = { id: employeeId, ...employeeToAdd };
-      setEmployees((prev) => [...prev, newEmp]);
-      setNewEmployee({
-        id: "",
-        firstName: "",
-        lastName: "",
-        idNumber: "",
-        role: "",
+        age: "",
+        gender: "",
+        dateOfHire: "",
+        phoneNumber: "",
+        email: "",
+        address: ""
       });
-      setDialogOpen(false);
+  
+      if (addedEmployee) {
+        setEmployees((prev) => [...prev, addedEmployee]);
+        setNewEmployee({
+          id: "",
+          firstName: "",
+          lastName: "",
+          idNumber: "",
+          role: "",
+        });
+        setSavingEmployee(false);
+        setDialogOpen(false);
+      }
     } catch (error) {
       console.error("Error adding employee:", error);
     }
   };
+  
 
   // Filter employees by first and last name
   const filteredEmployees = useMemo(() => {
@@ -130,17 +178,23 @@ export default function EmployeeManagementPage() {
   }, [filteredEmployees, currentPage]);
 
   const handleRowClick = (id: string) => {
+    if (!id) {
+      console.error("Employee ID is undefined");
+      return;
+    }
     router.push(`/business/employee-management/${id}`);
   };
 
   return (
-    <section className="p-4 shadow rounded bg-white space-y-6">
+    <section className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Employee Management</h2>
         <p className="text-muted-foreground">
           Add, remove, or edit your employees' details.
         </p>
       </div>
+
+      <Separator />
 
       <div className="flex justify-between items-center">
         <Input
@@ -154,7 +208,7 @@ export default function EmployeeManagementPage() {
         />
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button>Add Employee</Button>
+            <Button size="sm">Add Employee</Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
@@ -236,7 +290,11 @@ export default function EmployeeManagementPage() {
                 />
               </div>
               <DialogFooter>
-                <Button type="submit">Save Employee</Button>
+              <Button type="submit" disabled={savingEmployee}>
+                {savingEmployee && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save Employee
+              </Button>
+
                 <DialogClose asChild>
                   <Button variant="outline">Cancel</Button>
                 </DialogClose>
@@ -245,7 +303,7 @@ export default function EmployeeManagementPage() {
           </DialogContent>
         </Dialog>
       </div>
-
+      <div className="rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
@@ -258,17 +316,11 @@ export default function EmployeeManagementPage() {
         <TableBody>
           {paginatedEmployees.length ? (
             paginatedEmployees.map((emp) => (
-              <TableRow
-                key={emp.id}
-                onClick={() => handleRowClick(emp.id)}
-                className="cursor-pointer hover:bg-gray-50"
-              >
+              <TableRow key={emp.id} onClick={() => handleRowClick(emp.id)} className="cursor-pointer">
                 <TableCell>{emp.id}</TableCell>
-                <TableCell>
-                  {emp.firstName} {emp.lastName}
-                </TableCell>
-                <TableCell>{emp.idNumber}</TableCell>
-                <TableCell>{emp.role}</TableCell>
+                <TableCell>{`${emp.firstName} ${emp.lastName}`}</TableCell>
+                <TableCell>{emp.idNumber || "N/A"}</TableCell>
+                <TableCell>{emp.role || "N/A"}</TableCell>
               </TableRow>
             ))
           ) : (
@@ -280,6 +332,9 @@ export default function EmployeeManagementPage() {
           )}
         </TableBody>
       </Table>
+      </div>
+
+
       <div className="flex items-center justify-between mt-4">
         <Button
           variant="outline"

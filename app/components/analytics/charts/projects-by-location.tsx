@@ -28,35 +28,48 @@ interface ProjectData {
   registrationNumber: string;
   typeOfWork: string;
   vehicleType: string;
+  merchantCode?: string;
 }
 
 interface PieChartData {
   name: string;
   value: number;
+  fill?: string;
 }
 
-export function ProjectsByLocationChart() {
+interface ProjectsByLocationChartProps {
+  merchantCode?: string;
+}
+
+export function ProjectsByLocationChart({ merchantCode }: ProjectsByLocationChartProps) {
   const [data, setData] = useState<PieChartData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const colors = [
-    "#2563eb",
-    "#7c3aed",
-    "#db2777",
-    "#16a34a",
-    "#f59e0b",
-    "#ef4444",
+    "#10B981", // emerald-500
+    "#059669", // emerald-600
+    "#047857", // emerald-700
+    "#34D399", // emerald-400
+    "#6EE7B7", // emerald-300
+    "#A7F3D0", // emerald-200
   ];
-
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const querySnapshot = await getDocs(collection(db, "projects"));
+        let projectsRef;
+        // If a merchant code is provided, fetch projects for that merchant;
+        // otherwise, use the global "projects" collection.
+        if (merchantCode) {
+          projectsRef = collection(db, "merchants", merchantCode, "projects");
+        } else {
+          projectsRef = collection(db, "projects");
+        }
+        const querySnapshot = await getDocs(projectsRef);
         const projects: ProjectData[] = [];
-        querySnapshot.forEach((doc) => {
-          const project = doc.data() as Omit<ProjectData, "id">;
-          projects.push({ id: doc.id, ...project });
+        querySnapshot.forEach((docSnap) => {
+          const project = docSnap.data() as Omit<ProjectData, "id">;
+          projects.push({ id: docSnap.id, ...project });
         });
 
         // Group projects by location
@@ -78,16 +91,21 @@ export function ProjectsByLocationChart() {
     };
 
     fetchData();
-  }, []);
+  }, [merchantCode]);
 
-  // Transform data to include a fill property for each slice
+  // Transform data to include a fill property for each slice.
   const transformedData = data.map((d, i) => ({
-    location: d.name,
-    projects: d.value,
+    ...d,
     fill: colors[i % colors.length],
   }));
 
-  // A simple chart config for our tooltip.
+  // Compute totals and top location for footer summary.
+  const totalProjects = data.reduce((sum, d) => sum + d.value, 0);
+  const maxLocation = data.reduce(
+    (max, d) => (d.value > max.value ? d : max),
+    { name: "None", value: 0 }
+  );
+
   const chartConfig: ChartConfig = {
     projects: {
       label: "Projects",
@@ -144,30 +162,23 @@ export function ProjectsByLocationChart() {
         >
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <ChartTooltip
-                content={<ChartTooltipContent nameKey="projects" hideLabel />}
-              />
-              <Pie data={transformedData} dataKey="projects" outerRadius={80}>
+              <ChartTooltip content={<ChartTooltipContent nameKey="projects" hideLabel />} />
+              <Pie data={transformedData} dataKey="value" outerRadius={80}>
                 {transformedData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.fill} />
                 ))}
-                <LabelList
-                  dataKey="location"
-                  className="fill-background"
-                  stroke="none"
-                  fontSize={12}
-                />
+                <LabelList dataKey="name" className="fill-background" stroke="none" fontSize={12} />
               </Pie>
             </PieChart>
           </ResponsiveContainer>
         </ChartContainer>
       </CardContent>
       <CardFooter className="flex-col gap-2 text-sm">
-        <div className="flex items-center gap-2 font-medium leading-none">
-          Trending up by 5.2% this month <TrendingUp className="h-4 w-4" />
+        <div className="flex items-center gap-2 font-medium">
+          Total Projects: {totalProjects}
         </div>
-        <div className="leading-none text-muted-foreground">
-          Showing distribution of projects by location
+        <div className="text-muted-foreground">
+          Top Location: {maxLocation.name} ({maxLocation.value} projects)
         </div>
       </CardFooter>
     </Card>

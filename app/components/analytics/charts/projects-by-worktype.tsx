@@ -28,6 +28,7 @@ interface ProjectData {
   registrationNumber: string;
   typeOfWork: string;
   vehicleType: string;
+  merchantCode?: string;
 }
 
 interface PieChartData {
@@ -35,28 +36,37 @@ interface PieChartData {
   value: number;
 }
 
-export function ProjectsByWorkChart() {
+interface ProjectsByWorkChartProps {
+  merchantCode?: string;
+}
+
+export function ProjectsByWorkChart({ merchantCode }: ProjectsByWorkChartProps) {
   const [data, setData] = useState<PieChartData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const colors = [
-    "#2563eb",
-    "#7c3aed",
-    "#db2777",
-    "#16a34a",
-    "#f59e0b",
-    "#ef4444",
+    "#10B981", // emerald-500
+    "#059669", // emerald-600
+    "#047857", // emerald-700
+    "#34D399", // emerald-400
+    "#6EE7B7", // emerald-300
+    "#A7F3D0", // emerald-200
   ];
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const querySnapshot = await getDocs(collection(db, "projects"));
+        // Use merchant-specific collection if merchantCode is provided.
+        const collectionRef = merchantCode
+          ? collection(db, "merchants", merchantCode, "projects")
+          : collection(db, "projects");
+
+        const querySnapshot = await getDocs(collectionRef);
         const projects: ProjectData[] = [];
-        querySnapshot.forEach((doc) => {
-          const project = doc.data() as Omit<ProjectData, "id">;
-          projects.push({ id: doc.id, ...project });
+        querySnapshot.forEach((docSnap) => {
+          const project = docSnap.data() as Omit<ProjectData, "id">;
+          projects.push({ id: docSnap.id, ...project });
         });
 
         // Group projects by type of work
@@ -78,38 +88,25 @@ export function ProjectsByWorkChart() {
     };
 
     fetchData();
-  }, []);
+  }, [merchantCode]);
 
-  // Transform the data to include fill property for each slice.
+  // Transform data to include fill property for each slice.
   const transformedData = data.map((d, i) => ({
     workType: d.name,
     projects: d.value,
     fill: colors[i % colors.length],
   }));
 
+  // Compute footer summary: total projects and top work type.
+  const totalProjects = data.reduce((sum, d) => sum + d.value, 0);
+  const topWorkType = data.reduce(
+    (max, d) => (d.value > max.value ? d : max),
+    { name: "None", value: 0 }
+  );
+
   const chartConfig: ChartConfig = {
     projects: {
       label: "Projects",
-    },
-    chrome: {
-      label: "Chrome",
-      color: "hsl(var(--chart-1))",
-    },
-    safari: {
-      label: "Safari",
-      color: "hsl(var(--chart-2))",
-    },
-    firefox: {
-      label: "Firefox",
-      color: "hsl(var(--chart-3))",
-    },
-    edge: {
-      label: "Edge",
-      color: "hsl(var(--chart-4))",
-    },
-    other: {
-      label: "Other",
-      color: "hsl(var(--chart-5))",
     },
   };
 
@@ -163,30 +160,23 @@ export function ProjectsByWorkChart() {
         >
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <ChartTooltip
-                content={<ChartTooltipContent nameKey="projects" hideLabel />}
-              />
+              <ChartTooltip content={<ChartTooltipContent nameKey="projects" hideLabel />} />
               <Pie data={transformedData} dataKey="projects" outerRadius={80}>
                 {transformedData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.fill} />
                 ))}
-                <LabelList
-                  dataKey="workType"
-                  className="fill-background"
-                  stroke="none"
-                  fontSize={12}
-                />
+                <LabelList dataKey="workType" className="fill-background" stroke="none" fontSize={12} />
               </Pie>
             </PieChart>
           </ResponsiveContainer>
         </ChartContainer>
       </CardContent>
       <CardFooter className="flex-col gap-2 text-sm">
-        <div className="flex items-center gap-2 font-medium leading-none">
-          Trending up by 5.2% this month <TrendingUp className="h-4 w-4" />
+        <div className="flex items-center gap-2 font-medium">
+          Total Projects: {totalProjects}
         </div>
         <div className="leading-none text-muted-foreground">
-          Showing distribution of projects by work type
+          Top Work Type: {topWorkType.name} ({topWorkType.value} projects)
         </div>
       </CardFooter>
     </Card>
