@@ -1,13 +1,6 @@
-// app/business/page.tsx
-import React from "react";
+import { redirect } from "next/navigation";
 
 export default function BusinessIndexPage() {
-  return (
-    <div className="space-y-2">
-      <h1 className="text-2xl font-bold">Business Module</h1>
-      <p className="text-muted-foreground">
-        Select a section from the sidebar to manage your business settings.
-      </p>
-    </div>
-  );
+  redirect("/business/profile"); // Redirect to Profile page by default
+  return null;
 }

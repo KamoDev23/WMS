@@ -15,7 +15,7 @@ export default function BusinessLayout({
   return (
     <div>
       {/* Global Header spanning full width */}
-      <header className="px-6 py-4    ">
+      <header className="     ">
         <h1 className="text-3xl font-bold mb-1">Business Module</h1>
         <p className="text-muted-foreground mb-2">
           Manage your business details and settings here.

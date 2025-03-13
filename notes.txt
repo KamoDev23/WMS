@@ -1,0 +1,64 @@
+WMS
+
+ - Closing Projects
+	- Project complete
+		- Remittence reminder ( project can be closed before remittence is recieved )
+
+	- Project cancelled 
+		- Pop-up (Reason for cancelation - textfield)  ✔
+
+ - Declined Quotes (Update)
+	- Update uploaded Repair quote
+		- "Update" button 
+		- Prompt the user to upload new doc
+		- Prompt to add new amount
+	- Keep old quote
+	- Recalculate using new quote  ✔
+
+
+ - Expired Pre-auth
+	- Add update functionality (Pre-auths expire after 15days) ✔
+
+ - Option button on documents view ✔
+
+
+ - Delete confirmations + animations  ✔
+
+ - Project ID creation should be more flexible 
+
+ - Vehicle types grouped by Yellow and White fleet
+
+ - Edit button gives a pop-up (dialog) with a iFrame of the doc with input for amount (Accounting section on Project page) ✔
+
+
+ - Downloading of accounting docs
+	- Checkbox with Categories
+		- Checkbox sub-categories (document-types)
+
+
+ - Settings
+	- Allow user to add Accounting documents types ✔
+	- Add themes ✔
+	
+
+ - User Activity Log
+	- With Push notification
+
+
+- Manage docs. with some sort of state on wethers it's being used of not esp for repair quotes after being updated ✔
+
+- dOWNLOAD ZIP PRIVILAGES
+
+- INVOICE UPLOAD ERROR ✔
+
+- employee age from id number
+
+= accounting docs increment
+
+- Document upload types ✔
+
+- Script to read pre-auth
+
+- Delete confirmation & loading animation ( Profile page & Accounting page )
+
+- Saving user details

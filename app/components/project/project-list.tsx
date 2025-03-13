@@ -1,179 +1,132 @@
 "use client";
-import React, { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import ProjectsCarouselView from "./tables/projects-carousel-view";
+import ProjectsTable from "./tables/projects-table";
+import { Loader2, RefreshCw } from "lucide-react";
+import { fetchProjectsForMerchant } from "@/lib/fetch-projects";
+import { Project } from "@/types/project";
+import { useAuth } from "@/context/auth-context";
+import { db } from "@/firebase/firebase-config";
+import { getDocs, collection } from "firebase/firestore";
 
-export interface Project {
-  id: string;
-  registrationNumber: string;
-  vehicleType: string;
-  typeOfWork: string;
-  location: string;
-  date: string;
+interface ProjectsListPageProps {
+  projects?: Project[];
+  isLoading?: boolean;
+  onRefresh?: () => void;
+  merchantCode?: string | null;
 }
 
-export interface ProjectsListProps {
-  projects: Project[];
-}
+export default function ProjectsListPage({
+  projects: externalProjects,
+  isLoading: externalLoading,
+  onRefresh: externalRefresh,
+  merchantCode: externalMerchantCode
+}: ProjectsListPageProps) {
+  const { user } = useAuth();
+  const [internalProjects, setInternalProjects] = useState<Project[]>([]);
+  const [internalLoading, setInternalLoading] = useState<boolean>(true);
+  const [activeTab, setActiveTab] = useState<"table" | "carousel">("table");
+  const [internalMerchantCode, setInternalMerchantCode] = useState<string | null>(null);
 
-type SortOrder = "asc" | "desc";
+  // Determine if we're using external or internal data sources
+  const isExternalData = externalProjects !== undefined;
+  const projects = isExternalData ? externalProjects : internalProjects;
+  const loading = isExternalData ? (externalLoading || false) : internalLoading;
+  const merchantCode = isExternalData ? externalMerchantCode : internalMerchantCode;
 
-export const ProjectsList: React.FC<ProjectsListProps> = ({ projects }) => {
-  const router = useRouter();
-  // Use passed-in projects; default to empty array if none provided.
-  const data = projects ?? [];
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortColumn, setSortColumn] = useState<keyof Project | null>(null);
-  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
-  const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 5;
+  // Handle internal data fetching if no external data is provided
+  useEffect(() => {
+    // Skip if we're using external data or if no user is logged in
+    if (isExternalData || !user) return;
 
-  const handleSort = (column: keyof Project) => {
-    if (sortColumn === column) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-    } else {
-      setSortColumn(column);
-      setSortOrder("asc");
+    const fetchMerchantProjects = async () => {
+      try {
+        setInternalLoading(true);
+        // Fetch user's merchant code
+        const userDoc = await getDocs(collection(db, "users"));
+        const userData = userDoc.docs.find((doc) => doc.id === user.uid)?.data();
+        if (!userData || !userData.merchantCode) {
+          console.error("Merchant code not found for user");
+          setInternalLoading(false);
+          return;
+        }
+        setInternalMerchantCode(userData.merchantCode);
+        // Fetch projects linked to this merchant
+        const fetchedProjects = await fetchProjectsForMerchant(userData.merchantCode);
+        setInternalProjects(fetchedProjects);
+      } catch (error) {
+        console.error("Error fetching projects:", error);
+      } finally {
+        setInternalLoading(false);
+      }
+    };
+
+    fetchMerchantProjects();
+  }, [user, isExternalData]);
+
+  // Function to refresh projects
+  const handleRefresh = async () => {
+    if (externalRefresh) {
+      // Use external refresh function if provided
+      externalRefresh();
+    } else if (internalMerchantCode) {
+      // Otherwise handle internally
+      try {
+        setInternalLoading(true);
+        const fetchedProjects = await fetchProjectsForMerchant(internalMerchantCode);
+        setInternalProjects(fetchedProjects);
+      } catch (error) {
+        console.error("Error refreshing projects:", error);
+      } finally {
+        setInternalLoading(false);
+      }
     }
   };
 
-  const filteredProjects = useMemo(() => {
-    return data.filter((project) =>
-      Object.values(project).some((value) =>
-        value.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <p className="mt-2">Loading projects...</p>
+      </div>
     );
-  }, [searchQuery, data]);
-
-  const sortedProjects = useMemo(() => {
-    if (!sortColumn) return filteredProjects;
-    return [...filteredProjects].sort((a, b) => {
-      const aVal = a[sortColumn];
-      const bVal = b[sortColumn];
-      if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
-      if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
-      return 0;
-    });
-  }, [filteredProjects, sortColumn, sortOrder]);
-
-  const totalPages = Math.ceil(sortedProjects.length / rowsPerPage);
-  const paginatedProjects = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return sortedProjects.slice(start, start + rowsPerPage);
-  }, [sortedProjects, currentPage]);
-
-  const handleRowClick = (id: string) => {
-    router.push(`/projects/${id}`);
-  };
+  }
 
   return (
-    <section className="p-4 shadow rounded">
-      <h2 className="text-xl font-bold mb-4">Projects</h2>
-      <div className="mb-4">
-        <Input
-          placeholder="Search projects..."
-          value={searchQuery}
-          onChange={(e) => {
-            setSearchQuery(e.target.value);
-            setCurrentPage(1);
-          }}
+    <div className="">
+      <div className="flex justify-between items-center mb-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as "table" | "carousel")}
           className="w-full"
-        />
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead onClick={() => handleSort("id")}>
-              Project ID{" "}
-              {sortColumn === "id" ? (sortOrder === "asc" ? "▲" : "▼") : ""}
-            </TableHead>
-            <TableHead onClick={() => handleSort("registrationNumber")}>
-              Registration Number{" "}
-              {sortColumn === "registrationNumber"
-                ? sortOrder === "asc"
-                  ? "▲"
-                  : "▼"
-                : ""}
-            </TableHead>
-            <TableHead onClick={() => handleSort("typeOfWork")}>
-              Type of Work{" "}
-              {sortColumn === "typeOfWork"
-                ? sortOrder === "asc"
-                  ? "▲"
-                  : "▼"
-                : ""}
-            </TableHead>
-            <TableHead onClick={() => handleSort("location")}>
-              Location{" "}
-              {sortColumn === "location"
-                ? sortOrder === "asc"
-                  ? "▲"
-                  : "▼"
-                : ""}
-            </TableHead>
-            <TableHead onClick={() => handleSort("date")}>
-              Date{" "}
-              {sortColumn === "date" ? (sortOrder === "asc" ? "▲" : "▼") : ""}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {paginatedProjects.length ? (
-            paginatedProjects.map((project) => (
-              <TableRow
-                key={project.id}
-                onClick={() => handleRowClick(project.id)}
-              >
-                <TableCell>{project.id}</TableCell>
-                <TableCell>{project.registrationNumber}</TableCell>
-                <TableCell>{project.typeOfWork}</TableCell>
-                <TableCell>{project.location}</TableCell>
-                <TableCell>{project.date}</TableCell>
-              </TableRow>
-            ))
-          ) : (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center h-24">
-                No results.
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-      <div className="flex items-center justify-between mt-4">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-          disabled={currentPage === 1}
         >
-          Previous
-        </Button>
-        <div>
-          Page {currentPage} of {totalPages}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-          }
-          disabled={currentPage === totalPages}
-        >
-          Next
-        </Button>
+          <div className="flex justify-between items-center">
+            <TabsList>
+              <TabsTrigger value="table">Table View</TabsTrigger>
+              {/* <TabsTrigger value="carousel">Card View</TabsTrigger> */}
+            </TabsList>
+            
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleRefresh}
+              className="ml-auto"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
+          
+          <TabsContent value="table" className="">
+            <ProjectsTable projects={projects} />
+          </TabsContent>
+          {/* <TabsContent value="carousel" className="">
+            <ProjectsCarouselView projects={projects} />
+          </TabsContent> */}
+        </Tabs>
       </div>
-    </section>
+    </div>
   );
-};
-
-export default ProjectsList;
+}

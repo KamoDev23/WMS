@@ -10,13 +10,14 @@ const navItems = [
   { title: "Profile", href: "/business/profile" },
   { title: "Employee Management", href: "/business/employee-management" },
   { title: "Accounting", href: "/business/accounting" },
+  { title: "Settings", href: "/business/settings" },
 ];
 
 export default function SidebarNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="space-y-1 p-6">
+    <nav className="space-y-1 p-6"> 
       {navItems.map((item) => {
         const isActive = pathname === item.href;
         return (

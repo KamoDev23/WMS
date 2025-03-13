@@ -69,7 +69,7 @@ const ProfileSection: React.FC = () => {
   return (
     <form
       onSubmit={handleSave}
-      className="space-y-4 p-4 bg-white shadow rounded"
+      className="space-y-4 p-4  "
     >
       <div>
         <Label htmlFor="companyName" className="block text-sm font-medium">
@@ -138,7 +138,7 @@ const ProfileSection: React.FC = () => {
       </div>
       <Button
         type="submit"
-        className="px-4 py-2 bg-blue-600 text-white rounded"
+        className="px-4 py-2  d"
       >
         Save Profile
       </Button>

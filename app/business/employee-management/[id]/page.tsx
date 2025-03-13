@@ -1,15 +1,9 @@
 "use client";
-
 import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
-import {
-  ref,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-} from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/firebase/firebase-config";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,10 +14,31 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
+  SelectGroup,
 } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
+import { useAuth } from "@/context/auth-context";
+import { Separator } from "@/components/ui/separator";
+import { Loader2, CircleX } from "lucide-react";
+import { useDropzone } from "react-dropzone";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  deleteEmployeeDocument,
+  fetchEmployeeById,
+  fetchEmployeeDocuments,
+  fetchUserMerchantCode,
+  saveEmployee,
+  uploadEmployeeDocument,
+} from "@/lib/employee-utils";
 
-// Define the employee interface with extra fields
 interface Employee {
   id: string;
   firstName: string;
@@ -36,9 +51,9 @@ interface Employee {
   phoneNumber: string;
   email: string;
   address: string;
+  merchantCode: string;
 }
 
-// Document interface for employee documents
 interface UploadedDocument {
   id: string;
   fileName: string;
@@ -47,13 +62,11 @@ interface UploadedDocument {
   employeeId: string;
 }
 
-export default function EmployeeDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function EmployeeDetailPage() {
+  const { id } = useParams() as { id: string };
   const router = useRouter();
-  const { id } = params;
+  const { user } = useAuth();
+  const [merchantCode, setMerchantCode] = useState<string | null>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [editMode, setEditMode] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
@@ -61,55 +74,89 @@ export default function EmployeeDetailPage({
   // Document states
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [docType, setDocType] = useState<
-    "ID Copy" | "Employment Contract" | "Proof of Address" | "Other"
-  >("ID Copy");
-  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  // For document category from merchant doc (dynamically fetched)
+  const [documentCategories, setDocumentCategories] = useState<string[]>([]);
+  const [docType, setDocType] = useState<string>("");
 
-  const docTypes: (
-    | "ID Copy"
-    | "Employment Contract"
-    | "Proof of Address"
-    | "Other"
-  )[] = ["ID Copy", "Employment Contract", "Proof of Address", "Other"];
+  const [loadingDocuments, setLoadingDocuments] = useState<boolean>(false);
+  const [docToDelete, setDocToDelete] = useState<{ id: string; fileName: string } | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  const docTypeOptions = ["ID Copy", "Employment Contract", "Proof of Address", "Other"];
 
   // Fetch employee details from Firestore
   useEffect(() => {
-    const fetchEmployee = async () => {
+    if (!user || !id) return;
+
+    const loadEmployeeData = async () => {
       try {
-        const docRef = doc(db, "businessEmployees", id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setEmployee({ id, ...docSnap.data() } as Employee);
-        } else {
-          router.push("/business/employee-management");
+        setLoading(true);
+
+        // Get the merchantCode for the current user
+        const userMerchantCode = await fetchUserMerchantCode();
+        if (!userMerchantCode) {
+          console.error("Merchant code not found");
+          return;
+        }
+
+        setMerchantCode(userMerchantCode);
+
+        // Fetch employee with the merchant code
+        const employeeData = await fetchEmployeeById(userMerchantCode, id);
+        if (employeeData) {
+          setEmployee({ ...employeeData, merchantCode: userMerchantCode });
+          // Fetch documents after employee is loaded
+          await fetchDocuments();
         }
       } catch (error) {
-        console.error("Error fetching employee:", error);
+        console.error("Error loading employee data:", error);
+      } finally {
+        setLoading(false);
       }
     };
 
-    const fetchDocuments = async () => {
+    loadEmployeeData();
+  }, [user, id]);
+
+  const fetchDocuments = async () => {
+    if (!merchantCode || !employee?.id) return;
+
+    setLoadingDocuments(true);
+    try {
+      const docs = await fetchEmployeeDocuments(merchantCode, employee.id);
+      setDocuments(docs);
+    } catch (error) {
+      console.error("Error fetching documents:", error);
+    } finally {
+      setLoadingDocuments(false);
+    }
+  };
+
+  // Fetch document categories from the merchant document when merchantCode is available
+  useEffect(() => {
+    if (!merchantCode) return;
+    const fetchDocumentCategories = async () => {
       try {
-        const querySnapshot = await getDocs(
-          collection(db, "employeeDocuments")
-        );
-        const fetchedDocs: UploadedDocument[] = [];
-        querySnapshot.forEach((docSnap) => {
-          const data = docSnap.data() as Omit<UploadedDocument, "id">;
-          if (data.employeeId === id) {
-            fetchedDocs.push({ id: docSnap.id, ...data });
+        const merchantDocRef = doc(db, "merchants", merchantCode);
+        const merchantSnap = await getDoc(merchantDocRef);
+        if (merchantSnap.exists()) {
+          const data = merchantSnap.data();
+          const categories = data.employeeDocumentOptions || [];
+          setDocumentCategories(categories);
+          // Set default if not set
+          if (!docType && categories.length > 0) {
+            setDocType(categories[0]);
           }
-        });
-        setDocuments(fetchedDocs);
+        } else {
+          setDocumentCategories([]);
+        }
       } catch (error) {
-        console.error("Error fetching documents:", error);
+        console.error("Error fetching document categories:", error);
+        setDocumentCategories([]);
       }
     };
-
-    fetchEmployee();
-    fetchDocuments();
-  }, [id, router]);
+    fetchDocumentCategories();
+  }, [merchantCode]);
 
   // Handle input changes for employee details
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -117,67 +164,88 @@ export default function EmployeeDetailPage({
     setEmployee({ ...employee, [e.target.name]: e.target.value });
   };
 
-  // Handle saving changes to employee details
   const handleSave = async () => {
-    if (!employee) return;
-    setLoading(true);
-    try {
-      const docRef = doc(db, "businessEmployees", id);
-      await updateDoc(docRef, { ...employee });
-      setEditMode(false);
-    } catch (error) {
-      console.error("Error updating employee:", error);
-    } finally {
-      setLoading(false);
-    }
+    if (!merchantCode || !employee) return;
+    await saveEmployee(merchantCode, employee);
+    setEditMode(false);
   };
 
   // Handle file upload for employee documents
-  const handleUpload = async () => {
-    if (!selectedFile || !employee) return;
+  const handleUploadDocument = async () => {
+    if (!selectedFile || !merchantCode || !employee) return;
     setLoading(true);
     try {
-      const fileRef = ref(
-        storage,
-        `employees/${employee.id}/${docType}-${Date.now()}`
+      const newDoc = await uploadEmployeeDocument(
+        merchantCode,
+        employee.id,
+        selectedFile,
+        docType
       );
-      const snapshot = await uploadBytes(fileRef, selectedFile);
-      const url = await getDownloadURL(snapshot.ref);
-
-      const docData = {
-        employeeId: employee.id,
-        docType,
-        fileName: selectedFile.name,
-        url,
-      };
-      const docRef = await addDoc(collection(db, "employeeDocuments"), docData);
-      const newDoc: UploadedDocument = { id: docRef.id, ...docData };
-      setDocuments((prev) => [...prev, newDoc]);
-      setSelectedFile(null);
+      if (newDoc) {
+        setDocuments((prev) => [...prev, newDoc]);
+      }
     } catch (error) {
-      console.error("Error uploading file:", error);
+      console.error("Error uploading document:", error);
     } finally {
       setLoading(false);
+      setSelectedFile(null);
     }
   };
 
+  const handleDeleteDocument = async () => {
+    if (!merchantCode || !employee || !docToDelete) return;
+    setLoading(true);
+    try {
+      await deleteEmployeeDocument(merchantCode, employee.id, docToDelete.id, docToDelete.fileName);
+      setDocuments((prev) => prev.filter((doc) => doc.id !== docToDelete.id));
+    } catch (error) {
+      console.error("Error deleting document:", error);
+    } finally {
+      setLoading(false);
+      setShowDeleteDialog(false);
+      setDocToDelete(null);
+    }
+  };
+
+  const handleViewDocument = (url: string) => {
+    window.open(url, "_blank");
+  };
+
+  // Dropzone setup
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: (acceptedFiles) => {
+      if (acceptedFiles && acceptedFiles.length > 0) {
+        setSelectedFile(acceptedFiles[0]);
+      }
+    },
+    multiple: false,
+  });
+
   return (
-    <section className="space-y-6 p-6 shadow rounded bg-white">
+    <section className="space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Employee Details</h2>
+        <div>
+          <h2 className="text-2xl font-bold">Employee Management</h2>
+          <p className="text-muted-foreground">Edit employee details and documentation.</p>
+        </div>
         <Button variant="outline" onClick={() => setEditMode(!editMode)}>
           {editMode ? "Cancel" : "Edit"}
         </Button>
       </div>
 
-      {employee && (
+      <Separator />
+
+      {/* Employee Details Form */}
+      {loading ? (
+        <div className="flex justify-center">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : employee ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* First Name */}
             <div>
-              <Label htmlFor="firstName" className="block text-sm font-medium">
-                First Name
-              </Label>
+              <Label htmlFor="firstName" className="block text-sm font-medium">First Name</Label>
               <Input
                 id="firstName"
                 name="firstName"
@@ -187,11 +255,8 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* Last Name */}
             <div>
-              <Label htmlFor="lastName" className="block text-sm font-medium">
-                Last Name
-              </Label>
+              <Label htmlFor="lastName" className="block text-sm font-medium">Last Name</Label>
               <Input
                 id="lastName"
                 name="lastName"
@@ -201,11 +266,8 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* ID Number */}
             <div>
-              <Label htmlFor="idNumber" className="block text-sm font-medium">
-                ID Number
-              </Label>
+              <Label htmlFor="idNumber" className="block text-sm font-medium">ID Number</Label>
               <Input
                 id="idNumber"
                 name="idNumber"
@@ -215,11 +277,8 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* Age */}
             <div>
-              <Label htmlFor="age" className="block text-sm font-medium">
-                Age
-              </Label>
+              <Label htmlFor="age" className="block text-sm font-medium">Age</Label>
               <Input
                 id="age"
                 name="age"
@@ -229,17 +288,9 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* Gender */}
             <div>
-              <Label htmlFor="gender" className="block text-sm font-medium">
-                Gender
-              </Label>
-              <Select
-                value={employee.gender}
-                onValueChange={(val) =>
-                  setEmployee({ ...employee, gender: val })
-                }
-              >
+              <Label htmlFor="gender" className="block text-sm font-medium">Gender</Label>
+              <Select value={employee.gender} onValueChange={(val) => setEmployee({ ...employee, gender: val })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select Gender" />
                 </SelectTrigger>
@@ -250,11 +301,8 @@ export default function EmployeeDetailPage({
                 </SelectContent>
               </Select>
             </div>
-            {/* Role */}
             <div>
-              <Label htmlFor="role" className="block text-sm font-medium">
-                Role
-              </Label>
+              <Label htmlFor="role" className="block text-sm font-medium">Role</Label>
               <Input
                 id="role"
                 name="role"
@@ -264,11 +312,8 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* Date of Hire */}
             <div>
-              <Label htmlFor="dateOfHire" className="block text-sm font-medium">
-                Date of Hire
-              </Label>
+              <Label htmlFor="dateOfHire" className="block text-sm font-medium">Date of Hire</Label>
               <Input
                 id="dateOfHire"
                 name="dateOfHire"
@@ -279,14 +324,8 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* Phone Number */}
             <div>
-              <Label
-                htmlFor="phoneNumber"
-                className="block text-sm font-medium"
-              >
-                Phone Number
-              </Label>
+              <Label htmlFor="phoneNumber" className="block text-sm font-medium">Phone Number</Label>
               <Input
                 id="phoneNumber"
                 name="phoneNumber"
@@ -296,11 +335,8 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* Email */}
             <div>
-              <Label htmlFor="email" className="block text-sm font-medium">
-                Email
-              </Label>
+              <Label htmlFor="email" className="block text-sm font-medium">Email</Label>
               <Input
                 id="email"
                 name="email"
@@ -311,11 +347,8 @@ export default function EmployeeDetailPage({
                 className="mt-1"
               />
             </div>
-            {/* Address */}
             <div>
-              <Label htmlFor="address" className="block text-sm font-medium">
-                Address
-              </Label>
+              <Label htmlFor="address" className="block text-sm font-medium">Address</Label>
               <Input
                 id="address"
                 name="address"
@@ -332,69 +365,24 @@ export default function EmployeeDetailPage({
             </Button>
           )}
         </>
+      ) : (
+        <p>Employee not found</p>
       )}
 
-      {/* Document Upload Section */}
-      <div className="mt-6 p-4 shadow rounded bg-white">
-        <h3 className="text-xl font-bold mb-2">Employee Documents</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* File Upload */}
-          <div>
-            <Label htmlFor="fileUpload" className="block text-sm font-medium">
-              Upload Document
-            </Label>
-            <Input
-              id="fileUpload"
-              type="file"
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  setSelectedFile(e.target.files[0]);
-                }
-              }}
-              className="mt-1"
-            />
-          </div>
-          {/* Document Type Select */}
-          <div>
-            <Label className="block text-sm font-medium">Document Type</Label>
-            <Select
-              value={docType}
-              onValueChange={(value) =>
-                setDocType(
-                  value as
-                    | "ID Copy"
-                    | "Employment Contract"
-                    | "Proof of Address"
-                    | "Other"
-                )
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select Document Type" />
-              </SelectTrigger>
-              <SelectContent>
-                {docTypes.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {type}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {/* Upload Button */}
-          <div className="flex items-end">
-            <Button onClick={handleUpload} disabled={!selectedFile}>
-              Upload
-            </Button>
-          </div>
-        </div>
+      <Separator />
 
-        {/* Display Document List */}
+      {/* Document Upload Section */}
+      <h3 className="text-xl font-bold mb-2">Documents</h3>
+
+      {/* Documents List Section */}
+      {loadingDocuments ? (
+        <div className="flex justify-center mt-4">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : (
         <div className="mt-4 space-y-4">
           {documents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No documents uploaded yet.
-            </p>
+            <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
           ) : (
             documents.map((doc, index) => (
               <Card key={doc.id} className="p-4">
@@ -403,23 +391,22 @@ export default function EmployeeDetailPage({
                     <p className="text-sm">
                       {doc.fileName} ({index + 1})
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {doc.docType}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{doc.docType}</p>
                   </div>
                   <div className="space-x-2">
                     <Button
-                      variant="outline"
                       size="sm"
-                      onClick={() => window.open(doc.url, "_blank")}
+                      variant="outline"
+                      onClick={() => handleViewDocument(doc.url)}
                     >
                       View
                     </Button>
                     <Button
-                      variant="destructive"
                       size="sm"
+                      variant="destructive"
                       onClick={() => {
-                        // Delete document logic here
+                        setDocToDelete({ id: doc.id, fileName: doc.fileName });
+                        setShowDeleteDialog(true);
                       }}
                     >
                       Delete
@@ -430,7 +417,92 @@ export default function EmployeeDetailPage({
             ))
           )}
         </div>
-      </div>
+      )}
+
+      <Card className="p-4">
+        <h3 className="text-lg font-medium">Upload New Document</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="category-select" className="block mb-2 text-sm font-medium">
+              Document Category
+            </Label>
+            <Select value={docType} onValueChange={(value) => setDocType(value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {documentCategories.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {selectedFile && (
+              <p className="mt-2 text-sm text-green-600">
+                File selected: {selectedFile.name}
+              </p>
+            )}
+          </div>
+        </div>
+        {/* Single Drop Zone */}
+        <div
+          {...getRootProps()}
+          className={`flex h-52 w-full items-center justify-center rounded border-2 border-dashed p-4 mt-4 ${
+            isDragActive ? "bg-gray-100" : ""
+          }`}
+        >
+          <input {...getInputProps()} />
+          {isDragActive ? (
+            <p>Drop the file here ...</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Drag &amp; drop a file here, or click to select one.
+            </p>
+          )}
+        </div>
+        <div className="flex justify-end mt-2">
+          <Button onClick={handleUploadDocument} disabled={!selectedFile || !docType || loading}>
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              "Upload Document"
+            )}
+          </Button>
+        </div>
+      </Card> 
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Delete</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this document? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="destructive" onClick={handleDeleteDocument}>
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </Button>
+            <DialogClose asChild>
+              <Button variant="outline">Cancel</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

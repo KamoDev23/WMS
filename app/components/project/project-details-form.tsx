@@ -6,6 +6,40 @@ import { Label } from "@/components/ui/label";
 import UploadDocumentsSection from "./upload-document/upload-document";
 import AccountingSection from "./accounting/accounting";
 import { Separator } from "@/components/ui/separator";
+import {
+  Breadcrumb,
+  BreadcrumbList,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbSeparator,
+  BreadcrumbPage,
+} from "@/components/ui/breadcrumb";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { Textarea } from "@/components/ui/textarea";
+import { useCustomToast } from "../customs/toast";
+import { toast } from "sonner";
+// Import Tabs components
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { HouseIcon, PanelsTopLeftIcon, BoxIcon, HomeIcon } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { db } from "@/firebase/firebase-config";
+import { doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
+import { useAuth } from "@/context/auth-context";
 
 export interface ProjectDetail {
   id: string;
@@ -16,16 +50,16 @@ export interface ProjectDetail {
   projectDescription: string;
   partners: string;
   fleetNumber: string;
+  status: string; // e.g. "open", "closed", "cancelled"
+  cancellationReason?: string;
 }
 
 interface ProjectDetailFormProps {
   project: ProjectDetail;
-  onSave: (project: ProjectDetail) => void;
-  onSubmit: (project: ProjectDetail) => void;
+  onSave?: (project: ProjectDetail) => void;
   onCancel: () => void;
 }
 
-// Helper component to display a label with a red "*" if the value is empty.
 const LabelWithAsterisk: React.FC<{
   htmlFor: string;
   label: string;
@@ -36,19 +70,61 @@ const LabelWithAsterisk: React.FC<{
   </Label>
 );
 
+// Helper to get badge classes based on status.
+const getStatusBadgeClass = (status: string) => {
+  switch (status.toLowerCase()) {
+    case "Open":
+      return "bg-green-100 text-green-800";
+    case "Closed":
+      return "bg-gray-100 text-gray-800";
+    case "Cancelled":
+      return "bg-red-100 text-red-800";
+    default:
+      return "";
+  }
+};
+
 export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
   project: initialProject,
   onSave,
-  onSubmit,
   onCancel,
 }) => {
   const [project, setProject] = useState<ProjectDetail>(initialProject);
+  const [isEditing, setIsEditing] = useState(false);
+  const [showCloseOptions, setShowCloseOptions] = useState(false);
+  const [showCancelReasonModal, setShowCancelReasonModal] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isConfirmingCancellation, setIsConfirmingCancellation] = useState(false);
+  
+  const { user } = useAuth();
+  const [merchantCode, setMerchantCode] = useState<string | null>(null);
+  const showToast = useCustomToast();
+
+  // Fetch merchant code from the user document.
+  useEffect(() => {
+    if (!user) return;
+    const fetchMerchantCode = async () => {
+      try {
+        const userSnapshot = await getDocs(collection(db, "users"));
+        const userData = userSnapshot.docs.find(doc => doc.id === user.uid)?.data();
+        if (userData && userData.merchantCode) {
+          setMerchantCode(userData.merchantCode);
+        } else {
+          console.error("Merchant code not found for this user.");
+        }
+      } catch (error) {
+        console.error("Error fetching merchant code:", error);
+      }
+    };
+    fetchMerchantCode();
+  }, [user]);
 
   // Auto-generate the Project ID based on the registration number.
   useEffect(() => {
     const prefix = project.registrationNumber.slice(0, 6).toUpperCase();
-    // For demonstration, assume sequence "001"
-    const sequence = "001";
+    const sequence = "001"; // For demonstration, using a static sequence.
     const generatedId = `${prefix}-${sequence}`;
     setProject((prev) => ({ ...prev, id: generatedId }));
   }, [project.registrationNumber]);
@@ -60,181 +136,385 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
     setProject((prev) => ({ ...prev, [name]: value }));
   };
 
+  // Updated to use new database directory: merchants/{merchantCode}/projects/{project.id}
+  const handleSaveProject = async () => {
+    if (!merchantCode) return;
+    setIsSaving(true);
+    try {
+      const projectRef = doc(db, "merchants", merchantCode, "projects", project.id);
+      // Update the project document with the new values.
+      await updateDoc(projectRef, {
+        typeOfWork: project.typeOfWork || "",
+        registrationNumber: project.registrationNumber || "",
+        vehicleType: project.vehicleType || "",
+        location: project.location || "",
+        projectDescription: project.projectDescription || "",
+        partners: project.partners || "",
+        fleetNumber: project.fleetNumber || "",
+        status: project.status || "",
+      });
+      toast.success("Project updated successfully!");
+      if (onSave) onSave(project);
+      setIsEditing(false);
+    } catch (error) {
+      console.error("Error updating project:", error);
+      toast.error("Failed to update project");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Updated to use new directory.
+  const handleProjectComplete = async () => {
+    if (!merchantCode) return;
+    setIsSaving(true);
+    try {
+      const projectRef = doc(db, "merchants", merchantCode, "projects", project.id);
+      await updateDoc(projectRef, {
+        status: "Closed",
+      });
+      toast.success("Project marked as complete and closed.");
+      setProject((prev) => ({ ...prev, status: "Closed" }));
+    } catch (error) {
+      console.error("Error marking project as complete:", error);
+      toast.error("Failed to mark project as complete.");
+    } finally {
+      setIsSaving(false);
+      setShowCloseModal(false);
+    }
+  };
+
+  // Updated to use new directory.
+  const handleConfirmCancellation = async () => {
+    if (!merchantCode) return;
+    setIsConfirmingCancellation(true);
+    try {
+      console.log("Project cancelled with reason:", cancelReason);
+      const projectRef = doc(db, "merchants", merchantCode, "projects", project.id);
+      await updateDoc(projectRef, {
+        status: "Cancelled",
+        cancellationReason: cancelReason,
+      });
+      toast.success("Project cancelled successfully!");
+    } catch (error) {
+      console.error("Error cancelling project:", error);
+      toast.error("Failed to cancel project");
+    } finally {
+      setIsConfirmingCancellation(false);
+      setShowCancelReasonModal(false);
+    }
+  };
+
+  const handleProjectClosed = () => {
+    setShowCloseModal(true);
+  };
+
+  const handleProjectCancelled = () => {
+    setShowCancelReasonModal(true);
+    setShowCloseOptions(false);
+  };
+
   return (
-    <form className="space-y-6 p-4">
+    <form className="space-y-6">
+      {/* Breadcrumbs */}
+      <div className="flex flex-col space-y-2 mb-4">
+        <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <HomeIcon size={16} aria-hidden="true" />
+              <BreadcrumbLink href="/">Home</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbLink href="/projects">Projects</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{project.id}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+      </div>
+
+      <Separator className="mb-6" />
+
       {/* Header Summary */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">{project.registrationNumber}</h1>
-        <div className="flex ">
-          <p className="text-muted-foreground">{project.vehicleType} • </p>
-          <p className="text-muted-foreground font-bold">{project.location}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">{project.registrationNumber}</h1>
+          <div className="flex items-center space-x-2">
+            <p className="text-muted-foreground">{project.vehicleType}</p>
+            <p>•</p>
+            <p className="text-muted-foreground font-bold">{project.location}</p>
+            <p>•</p>
+            <Badge className={getStatusBadgeClass(project.status)}>
+              {project.status}
+            </Badge>
+          </div>
+        </div>
+        <div className="flex justify-end space-x-4 relative">
+          {isEditing ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                type="button"
+                onClick={handleSaveProject}
+                disabled={isSaving}
+              >
+                {isSaving ? "Saving..." : "Save Changes"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                onClick={() => {
+                  setProject(initialProject);
+                  setIsEditing(false);
+                 }}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              type="button"
+              onClick={() => setIsEditing(true)}
+            >
+              Edit
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="default" type="button">
+                Close Project
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleProjectClosed}>
+                Project Complete
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleProjectCancelled}>
+                Project Cancelled
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      <Separator className="my-4" />
+      <div className="flex flex-col h-full">
+        <Tabs defaultValue="overview" className="flex flex-col flex-1">
+          <TabsList className="flex w-full text-foreground mb-3 h-auto gap-2 rounded-none border-b bg-transparent px-0 py-1">
+            <TabsTrigger
+              value="overview"
+              className="flex-1 text-center hover:bg-accent hover:text-foreground data-[state=active]:after:bg-primary data-[state=active]:hover:bg-accent relative after:absolute after:inset-x-0 after:bottom-0 after:-mb-1 after:h-0.5 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <HouseIcon className="-ms-0.5 me-1.5 opacity-60" size={16} aria-hidden="true" />
+              Overview
+            </TabsTrigger>
+            <TabsTrigger
+              value="documentation"
+              className="flex-1 text-center hover:bg-accent hover:text-foreground data-[state=active]:after:bg-primary data-[state=active]:hover:bg-accent relative after:absolute after:inset-x-0 after:bottom-0 after:-mb-1 after:h-0.5 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <PanelsTopLeftIcon className="-ms-0.5 me-1.5 opacity-60" size={16} aria-hidden="true" />
+              Documents
+            </TabsTrigger>
+            <TabsTrigger
+              value="accounting"
+              className="flex-1 text-center hover:bg-accent hover:text-foreground data-[state=active]:after:bg-primary data-[state=active]:hover:bg-accent relative after:absolute after:inset-x-0 after:bottom-0 after:-mb-1 after:h-0.5 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <BoxIcon className="-ms-0.5 me-1.5 opacity-60" size={16} aria-hidden="true" />
+              Accounting
+            </TabsTrigger>
+          </TabsList>
 
-      {/* Project Information Section */}
-      <div>
-        <h2 className="text-xl font-bold mb-2">Project Information</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="id" className="block text-sm font-medium">
-              Project ID
-            </Label>
-            <Input
-              id="id"
-              name="id"
-              value={project.id}
-              readOnly
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <LabelWithAsterisk
-              htmlFor="partners"
-              label="Partners"
-              value={project.partners}
-            />
-            <Input
-              id="partners"
-              name="partners"
-              value={project.partners}
-              onChange={handleChange}
-              placeholder="Enter partners separated by commas"
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <LabelWithAsterisk
-              htmlFor="typeOfWork"
-              label="Type of work"
-              value={project.typeOfWork}
-            />
-            <Input
-              id="typeOfWork"
-              name="typeOfWork"
-              value={project.typeOfWork}
-              onChange={handleChange}
-              placeholder="Enter type of work"
-              className="mt-1"
-            />
-          </div>
-          <div className="">
-            <LabelWithAsterisk
-              htmlFor="projectDescription"
-              label="Project Description"
-              value={project.projectDescription}
-            />
-            <textarea
-              id="projectDescription"
-              name="projectDescription"
-              value={project.projectDescription}
-              onChange={handleChange}
-              className="mt-1 block w-full border rounded p-2"
-            />
-          </div>
-        </div>
+          <TabsContent value="overview">
+            {/* Project Information Section */}
+            <div className="mb-4 space-y-6">
+              <h2 className="text-xl font-bold mb-4">Project Information</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="id" className="block text-sm font-medium">
+                    Project ID
+                  </Label>
+                  <Input id="id" name="id" value={project.id} readOnly className="mt-1" />
+                </div>
+                <div>
+                  <LabelWithAsterisk htmlFor="partners" label="Partners" value={project.partners} />
+                  <Input
+                    id="partners"
+                    name="partners"
+                    value={project.partners}
+                    onChange={handleChange}
+                    placeholder="Enter partners separated by commas"
+                    className="mt-1"
+                    disabled={!isEditing}
+                  />
+                </div>
+                <div>
+                  <LabelWithAsterisk htmlFor="typeOfWork" label="Type of work" value={project.typeOfWork} />
+                  <Input
+                    id="typeOfWork"
+                    name="typeOfWork"
+                    value={project.typeOfWork}
+                    onChange={handleChange}
+                    placeholder="Enter type of work"
+                    className="mt-1"
+                    disabled={!isEditing}
+                  />
+                </div>
+                
+                <div>
+                  <LabelWithAsterisk htmlFor="projectDescription" label="Project Description" value={project.projectDescription} />
+                  <textarea
+                    id="projectDescription"
+                    name="projectDescription"
+                    value={project.projectDescription}
+                    onChange={handleChange}
+                    className="mt-1 block w-full border rounded p-2"
+                    disabled={!isEditing}
+                  />
+                </div>
+
+                {project.status.toLowerCase() === "cancelled" && (
+                  <div className="col-span-1">
+                    <Label htmlFor="cancellationReason" className="block text-sm font-medium">
+                      Cancellation Reason
+                    </Label>
+                    <Textarea
+                      id="cancellationReason"
+                      name="cancellationReason"
+                      value={project.cancellationReason || ""}
+                      readOnly
+                      className="mt-1"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <Separator className="mb-4" />
+
+            {/* Vehicle Details Section */}
+            <div className="mb-6">
+              <h2 className="text-xl font-bold mb-4">Vehicle Details</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <LabelWithAsterisk
+                    htmlFor="registrationNumber"
+                    label="Registration Number"
+                    value={project.registrationNumber}
+                  />
+                  <Input
+                    id="registrationNumber"
+                    name="registrationNumber"
+                    value={project.registrationNumber}
+                    onChange={handleChange}
+                    className="mt-1"
+                    disabled={!isEditing}
+                  />
+                </div>
+                <div>
+                  <LabelWithAsterisk htmlFor="vehicleType" label="Vehicle Type" value={project.vehicleType} />
+                  <Input
+                    id="vehicleType"
+                    name="vehicleType"
+                    value={project.vehicleType}
+                    onChange={handleChange}
+                    className="mt-1"
+                    disabled={!isEditing}
+                  />
+                </div>
+                <div>
+                  <LabelWithAsterisk htmlFor="location" label="Location" value={project.location} />
+                  <Input
+                    id="location"
+                    name="location"
+                    value={project.location}
+                    onChange={handleChange}
+                    className="mt-1"
+                    disabled={!isEditing}
+                  />
+                </div>
+                <div>
+                  <LabelWithAsterisk htmlFor="fleetNumber" label="Fleet Number" value={project.fleetNumber} />
+                  <Input
+                    id="fleetNumber"
+                    name="fleetNumber"
+                    value={project.fleetNumber}
+                    onChange={handleChange}
+                    className="mt-1"
+                    disabled={!isEditing}
+                  />
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+          <TabsContent value="documentation" className="flex-1 overflow-auto">
+            <UploadDocumentsSection projectId={project.id} />
+          </TabsContent>
+          <TabsContent value="accounting" className="flex-1 overflow-auto">
+            <AccountingSection projectId={project.id} />
+          </TabsContent>
+        </Tabs>
       </div>
 
-      <Separator className="my-4" />
+      {/* Close project Modal */}
+      <Dialog open={showCloseModal} onOpenChange={setShowCloseModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close Project</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to close the project?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex justify-end space-x-2 mt-4">
+            <Button variant="outline" onClick={() => setShowCloseModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleProjectComplete}
+              disabled={isSaving}
+            >
+              {isSaving ? "Saving..." : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Vehicle Details Section */}
-      <div>
-        <h2 className="text-xl font-bold mb-2">Vehicle Details</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <LabelWithAsterisk
-              htmlFor="registrationNumber"
-              label="Registration Number"
-              value={project.registrationNumber}
-            />
-            <Input
-              id="registrationNumber"
-              name="registrationNumber"
-              value={project.registrationNumber}
-              onChange={handleChange}
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <LabelWithAsterisk
-              htmlFor="vehicleType"
-              label="Vehicle Type"
-              value={project.vehicleType}
-            />
-            <Input
-              id="vehicleType"
-              name="vehicleType"
-              value={project.vehicleType}
-              onChange={handleChange}
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <LabelWithAsterisk
-              htmlFor="location"
-              label="Location"
-              value={project.location}
-            />
-            <Input
-              id="location"
-              name="location"
-              value={project.location}
-              onChange={handleChange}
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <LabelWithAsterisk
-              htmlFor="fleetNumber"
-              label="Fleet Number"
-              value={project.fleetNumber}
-            />
-            <Input
-              id="fleetNumber"
-              name="fleetNumber"
-              value={project.fleetNumber}
-              onChange={handleChange}
-              className="mt-1"
-            />
-          </div>
-        </div>
-      </div>
-
-      <Separator className="my-4" />
-
-      {/* Upload Documents Section */}
-      <div>
-        <UploadDocumentsSection projectId={project.id} />
-      </div>
-
-      <Separator className="my-4" />
-
-      {/* Accounting Section */}
-      <div>
-        <AccountingSection projectId={project.id} />
-      </div>
-
-      {/* Form Actions */}
-      <div className="flex justify-end space-x-4">
-        <Button variant="outline" type="button" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button
-          variant="secondary"
-          type="button"
-          onClick={() => onSave(project)}
-        >
-          Save
-        </Button>
-        <Button
-          variant="default"
-          type="button"
-          onClick={() => onSubmit(project)}
-        >
-          Submit
-        </Button>
-      </div>
+      {/* Cancellation Reason Modal */}
+      <Dialog open={showCancelReasonModal} onOpenChange={setShowCancelReasonModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Project Cancelled</DialogTitle>
+            <DialogDescription>
+              Please provide the reason for cancellation:
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Reason for cancellation"
+            className="mt-2"
+          />
+          <DialogFooter className="flex justify-end space-x-2 mt-4">
+            <Button variant="outline" onClick={() => setShowCancelReasonModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleConfirmCancellation}
+              disabled={isConfirmingCancellation}
+            >
+              {isConfirmingCancellation ? "Processing..." : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 };
