@@ -5,6 +5,7 @@ export interface Project {
     typeOfWork: string;
     location: string;
     dateOpened: string;
+    dateClosed?: string;
     status: string;
     odometerReading: number;
   }

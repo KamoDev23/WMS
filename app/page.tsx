@@ -8,6 +8,8 @@ export default function Home() {
   const { user, loading } = useAuth()
   const router = useRouter()
 
+  
+
   useEffect(() => {
     if (!loading && user) {
       router.push("/dashboard") // Redirect authenticated users

@@ -47,7 +47,7 @@ WMS
 
 - Manage docs. with some sort of state on wethers it's being used of not esp for repair quotes after being updated ✔
 
-- dOWNLOAD ZIP PRIVILAGES
+- dOWNLOAD ZIP PRIVILAGES ✔
 
 - INVOICE UPLOAD ERROR ✔
 
@@ -62,3 +62,39 @@ WMS
 - Delete confirmation & loading animation ( Profile page & Accounting page )
 
 - Saving user details
+
+- Delete project
+
+- Create project (Project ID mismatch in project view)
+
+- Project history table sort by date
+
+- Forgot password page
+
+- Card view badge text size increase
+
+- Update doc not showing new file
+
+- Upload file pop-up
+
+- Automatically update ID
+
+- Add new user logs 
+
+- Label for contingent doc
+
+- Income - Amount & label on upload
+
+- Fuel & maintenance 
+	- Prompt type (Fule, maintenance or repair)
+	- If fuel label as fuel
+	- If maintenance Prompt label
+	- Repair prompt label 
+	= + amounts
+
+- Employee name & amount for payslip
+
+- Tax & BEE doc expire so track date (prompt user to input date)
+
+- Asset management (PLUS)
+

@@ -22,8 +22,8 @@ import {
 } from "@/components/ui/select";
  import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useCustomToast } from "../customs/toast";
-  
+import { useCustomToast } from "../../customs/toast";
+   
 export interface CreateProjectModalProps {
   onCreate: (project: NewProject) => Promise<void>;
   onClose: () => void;

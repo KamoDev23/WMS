@@ -12,13 +12,15 @@ import {
   SelectGroup,
   SelectItem,
 } from "@/components/ui/select";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { saveProfileData, uploadProfileDocument, deleteProfileDocument, fetchProfileData, fetchProfileDocuments } from "@/lib/profile-utils";
 import { useAuth } from "@/context/auth-context";
 import { db } from "@/firebase/firebase-config";
 import { getDoc, doc } from "firebase/firestore";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle, FileText } from "lucide-react";
+ import { toast } from "sonner";
+import DeleteConfirmationDialog from "@/app/components/customs/delete-confirmation-dialog";
 
 interface ProfileData {
   companyName: string;
@@ -32,7 +34,7 @@ interface ProfileData {
 
 interface ProfileDocument {
   id: string;
-  type: "BEE Document" | "Tax Certification" | "Insurance Document" | "Other";
+  type: string;
   fileName: string;
   url: string;
 }
@@ -48,11 +50,16 @@ export default function ProfilePage() {
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // Dummy state for documents (replace with Firebase integration)
+  // Document states
   const [documents, setDocuments] = useState<ProfileDocument[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [documentCategories, setDocumentCategories] = useState<string[]>([]);
   const [docType, setDocType] = useState<string>("");
+
+  // Delete confirmation dialog states
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [documentToDelete, setDocumentToDelete] = useState<{id: string, fileName: string} | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
 
   useEffect(() => {
@@ -103,6 +110,7 @@ export default function ProfilePage() {
         }
       } catch (error) {
         console.error("Error loading profile:", error);
+        toast.error("Failed to load profile data");
       } finally {
         setLoadingProfile(false);
         setLoadingDocuments(false);
@@ -117,7 +125,7 @@ export default function ProfilePage() {
     const { name, value } = e.target;
     setProfile((prev) => ({
       ...prev!,
-      [name]: value, // No need for `|| ""` because defaults are already handled
+      [name]: value,
     }));
   };
   
@@ -125,51 +133,61 @@ export default function ProfilePage() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log("Saving profile:", profile);
-      console.log("Merchant Code:", merchantCode);
+    console.log("Merchant Code:", merchantCode);
     if (!merchantCode || !profile) return;
       
     setSavingProfile(true);
     try {
       await saveProfileData(merchantCode, profile);
-      console.log("Profile saved:", profile);
+      toast.success("Profile saved successfully");
       setEditMode(false);
     } catch (error) {
       console.error("Error saving profile:", error);
+      toast.error("Failed to save profile data");
     } finally {
       setSavingProfile(false);
     }
   };
   
-  
-
   const handleUploadDocument = async () => {
-    if (!selectedFile || !merchantCode) return;
+    if (!selectedFile || !merchantCode || !docType) return;
     setUploading(true);
 
     try {
       const newDoc = await uploadProfileDocument(merchantCode, selectedFile, docType);
       if (newDoc) {
         setDocuments((prev) => [...prev, newDoc]);
+        toast.success("Document uploaded successfully");
       }
     } catch (error) {
       console.error("Error uploading document:", error);
+      toast.error("Failed to upload document");
     } finally {
       setUploading(false);
       setSelectedFile(null);
     }
   };
 
-  const handleDeleteDocument = async (docId: string, fileName: string) => {
-    if (!merchantCode) return;
+  const openDeleteDialog = (docId: string, fileName: string) => {
+    setDocumentToDelete({ id: docId, fileName });
+    setDeleteDialogOpen(true);
+  };
 
-    setLoadingDocuments(true);
+  const handleDeleteDocument = async () => {
+    if (!merchantCode || !documentToDelete) return;
+
+    setIsDeleting(true);
     try {
-      await deleteProfileDocument(merchantCode, docId, fileName);
-      setDocuments((prev) => prev.filter((doc) => doc.id !== docId));
+      await deleteProfileDocument(merchantCode, documentToDelete.id, documentToDelete.fileName);
+      setDocuments((prev) => prev.filter((doc) => doc.id !== documentToDelete.id));
+      toast.success("Document deleted successfully");
+      setDeleteDialogOpen(false);
     } catch (error) {
       console.error("Error deleting document:", error);
+      toast.error("Failed to delete document");
     } finally {
-      setLoadingDocuments(false);
+      setIsDeleting(false);
+      setDocumentToDelete(null);
     }
   };
 
@@ -200,7 +218,7 @@ export default function ProfilePage() {
         {editMode ? (
           <div className="flex gap-2">
             <Button size="sm" onClick={handleSaveProfile} disabled={savingProfile}>
-              {savingProfile ? <Loader2 className="animate-spin w-4 h-4" /> : "Save Profile"}
+              {savingProfile ? <> <Loader2 className="animate-spin w-4 h-4 mr-2" /> Saving... </ > : "Save Profile"}
             </Button>
             <Button size="sm" onClick={() => setEditMode(false)} variant="outline">
               Cancel
@@ -215,13 +233,18 @@ export default function ProfilePage() {
 
       {/* Profile Form */}
       {loadingProfile ? (
-        <div className="flex justify-center">
-          <Loader2 className="h-6 w-6 animate-spin" />
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : (
       <form onSubmit={handleSaveProfile} className="space-y-4">
-        <h3 className="text-xl font-bold mb-4">Company Details</h3>
-         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Company Details</CardTitle> 
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <Label htmlFor="companyName" className="block text-sm font-medium">
             Company Name
@@ -292,22 +315,23 @@ export default function ProfilePage() {
           />
         </div>
         <div>
-          <Label htmlFor="tagline" className="block text-sm font-medium">
-            Tagline / Slogan
+          <Label htmlFor="merchantCode" className="block text-sm font-medium">
+            Merchant Code
           </Label>
           <Input
-            id="tagline"
-            name="tagline"
-            value={profile?.tagline}
+            id="merchantCode"
+            name="merchantCode"
+            value={merchantCode || ""}
             onChange={handleProfileChange}
-            readOnly={!editMode}
+            readOnly 
             className="mt-1"
           />
         </div>
         </div>
-        
-        
-       
+          </CardContent>
+        </Card>
+         
+         
       </form>
       )}
 
@@ -318,26 +342,30 @@ export default function ProfilePage() {
 
         {/* Documents Upload Section */}
       {loadingDocuments ? (
-        <div className="flex justify-center">
-          <Loader2 className="h-6 w-6 animate-spin" />
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       ) : (
       <div>
-        
-
         {/* Document List */}
         <div className="mt-4 space-y-4">
           {documents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
+            <div className="flex flex-col items-center justify-center py-8 border border-dashed rounded-lg">
+              <FileText className="h-10 w-10 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
+            </div>
           ) : (
-            documents.map((doc, index) => (
+            documents.map((doc) => (
               <Card key={doc.id} className="p-4">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm">
-                      {doc.fileName} ({index + 1})
-                    </p>
-                    <p className="text-xs text-muted-foreground">{doc.type}</p>
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-primary/70" />
+                    <div>
+                      <p className="text-sm font-medium">
+                        {doc.fileName} 
+                      </p>
+                      <p className="text-xs text-muted-foreground">{doc.type}</p>
+                    </div>
                   </div>
                   <div className="space-x-2">
                     <Button
@@ -350,7 +378,7 @@ export default function ProfilePage() {
                     <Button
                       size="sm"
                       variant="destructive"
-                      onClick={() => handleDeleteDocument(doc.id, doc.fileName)}
+                      onClick={() => openDeleteDialog(doc.id, doc.fileName)}
                     >
                       Delete
                     </Button>
@@ -363,8 +391,8 @@ export default function ProfilePage() {
       </div>
        )}
 
-        <Card className="p-4">
-          <h3 className="text-lg font-medium">Upload New Document</h3>
+        <Card className="p-4 mt-6">
+          <h3 className="text-lg font-medium mb-4">Upload New Document</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="category-select" className="block mb-2 text-sm font-medium">
@@ -395,8 +423,8 @@ export default function ProfilePage() {
           {/* Single Drop Zone */}
           <div
             {...getRootProps()}
-            className={`flex h-52 w-full items-center justify-center rounded border-2 border-dashed p-4 ${
-              isDragActive ? "bg-gray-100" : ""
+            className={`flex h-52 w-full items-center justify-center rounded border-2 border-dashed p-4 mt-4 ${
+              isDragActive ? "bg-muted" : ""
             }`}
           >
             <input {...getInputProps()} />
@@ -409,7 +437,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end mt-4">
           <Button onClick={handleUploadDocument} disabled={!selectedFile || !docType || uploading}>
             {uploading ? (
               <>
@@ -420,13 +448,17 @@ export default function ProfilePage() {
               "Upload Document"
             )}
           </Button>
-
           </div>
         </Card>
         
-
-
-      
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        documentName={documentToDelete?.fileName || ""}
+        onConfirm={handleDeleteDocument}
+        isDeleting={isDeleting}
+      />
     </div>
   );
 }

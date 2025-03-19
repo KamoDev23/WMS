@@ -16,10 +16,10 @@ import {
   SelectItem,
   SelectGroup,
 } from "@/components/ui/select";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/context/auth-context";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, CircleX } from "lucide-react";
+import { Loader2, CircleX, FileText, HomeIcon } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import {
   Dialog,
@@ -38,6 +38,8 @@ import {
   saveEmployee,
   uploadEmployeeDocument,
 } from "@/lib/employee-utils";
+import { set } from "date-fns";
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator, BreadcrumbPage } from "@/components/ui/breadcrumb";
 
 interface Employee {
   id: string;
@@ -70,6 +72,9 @@ export default function EmployeeDetailPage() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [editMode, setEditMode] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [savingEmployeeDetails, setSavingEmployeeDetails] = useState<boolean>(false);
+  const [uploadingDoc, setUploadingDoc] = useState<boolean>(false);
+  const [deletingDoc, setDeletingDoc] = useState<boolean>(false);
 
   // Document states
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
@@ -84,53 +89,7 @@ export default function EmployeeDetailPage() {
 
   const docTypeOptions = ["ID Copy", "Employment Contract", "Proof of Address", "Other"];
 
-  // Fetch employee details from Firestore
-  useEffect(() => {
-    if (!user || !id) return;
 
-    const loadEmployeeData = async () => {
-      try {
-        setLoading(true);
-
-        // Get the merchantCode for the current user
-        const userMerchantCode = await fetchUserMerchantCode();
-        if (!userMerchantCode) {
-          console.error("Merchant code not found");
-          return;
-        }
-
-        setMerchantCode(userMerchantCode);
-
-        // Fetch employee with the merchant code
-        const employeeData = await fetchEmployeeById(userMerchantCode, id);
-        if (employeeData) {
-          setEmployee({ ...employeeData, merchantCode: userMerchantCode });
-          // Fetch documents after employee is loaded
-          await fetchDocuments();
-        }
-      } catch (error) {
-        console.error("Error loading employee data:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadEmployeeData();
-  }, [user, id]);
-
-  const fetchDocuments = async () => {
-    if (!merchantCode || !employee?.id) return;
-
-    setLoadingDocuments(true);
-    try {
-      const docs = await fetchEmployeeDocuments(merchantCode, employee.id);
-      setDocuments(docs);
-    } catch (error) {
-      console.error("Error fetching documents:", error);
-    } finally {
-      setLoadingDocuments(false);
-    }
-  };
 
   // Fetch document categories from the merchant document when merchantCode is available
   useEffect(() => {
@@ -158,6 +117,57 @@ export default function EmployeeDetailPage() {
     fetchDocumentCategories();
   }, [merchantCode]);
 
+    // Fetch employee details from Firestore
+    useEffect(() => {
+      if (!user || !id) return;
+  
+      const loadEmployeeData = async () => {
+        try {
+          setLoading(true);
+  
+          // Get the merchantCode for the current user
+          const userMerchantCode = await fetchUserMerchantCode();
+          if (!userMerchantCode) {
+            console.error("Merchant code not found");
+            return;
+          }
+  
+          setMerchantCode(userMerchantCode);
+  
+          // Fetch employee with the merchant code
+          const employeeData = await fetchEmployeeById(userMerchantCode, id);
+          if (employeeData) {
+            setEmployee({ ...employeeData, merchantCode: userMerchantCode });
+            // Fetch documents after employee is loaded
+            await fetchDocuments();
+          }
+        } catch (error) {
+          console.error("Error loading employee data:", error);
+        } finally {
+          setLoading(false);
+        }
+      };
+  
+      loadEmployeeData();
+    }, [user, id]);
+  
+    const fetchDocuments = async () => {
+      console.log("Fetching documents...");
+      console.log("Merchant code:", merchantCode);
+      console.log("Employee ID:", employee?.id);
+      if (!merchantCode || !employee?.id) return;
+  
+      setLoadingDocuments(true);
+      try {
+        const docs = await fetchEmployeeDocuments(merchantCode, employee.id);
+        setDocuments(docs);
+      } catch (error) {
+        console.error("Error fetching documents:", error);
+      } finally {
+        setLoadingDocuments(false);
+      }
+    };
+
   // Handle input changes for employee details
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!employee) return;
@@ -166,14 +176,16 @@ export default function EmployeeDetailPage() {
 
   const handleSave = async () => {
     if (!merchantCode || !employee) return;
+    setSavingEmployeeDetails(true);
     await saveEmployee(merchantCode, employee);
+    setSavingEmployeeDetails(false)
     setEditMode(false);
   };
 
   // Handle file upload for employee documents
   const handleUploadDocument = async () => {
     if (!selectedFile || !merchantCode || !employee) return;
-    setLoading(true);
+    setUploadingDoc(true);
     try {
       const newDoc = await uploadEmployeeDocument(
         merchantCode,
@@ -187,21 +199,21 @@ export default function EmployeeDetailPage() {
     } catch (error) {
       console.error("Error uploading document:", error);
     } finally {
-      setLoading(false);
+      setUploadingDoc(false);
       setSelectedFile(null);
     }
   };
 
   const handleDeleteDocument = async () => {
     if (!merchantCode || !employee || !docToDelete) return;
-    setLoading(true);
+    setDeletingDoc(true);
     try {
       await deleteEmployeeDocument(merchantCode, employee.id, docToDelete.id, docToDelete.fileName);
       setDocuments((prev) => prev.filter((doc) => doc.id !== docToDelete.id));
     } catch (error) {
       console.error("Error deleting document:", error);
     } finally {
-      setLoading(false);
+      setDeletingDoc(false);
       setShowDeleteDialog(false);
       setDocToDelete(null);
     }
@@ -227,11 +239,41 @@ export default function EmployeeDetailPage() {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Employee Management</h2>
-          <p className="text-muted-foreground">Edit employee details and documentation.</p>
+          <p className="text-muted-foregroun mb-4">Edit employee details and documentation.</p>
+          <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <HomeIcon size={16} aria-hidden="true" />
+              <BreadcrumbLink href="/">Settings</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbLink href="/projects">Employee Management</BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{employee?.id}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
         </div>
-        <Button variant="outline" onClick={() => setEditMode(!editMode)}>
+        <div className="space-x-2">
+        {editMode && (
+            <Button size="sm" onClick={handleSave} disabled={loading}>
+              {savingEmployeeDetails ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Save Changes"
+            )}
+            </Button>
+          )}
+        <Button size="sm" variant="outline" onClick={() => setEditMode(!editMode)}>
           {editMode ? "Cancel" : "Edit"}
         </Button>
+        </div>
       </div>
 
       <Separator />
@@ -243,7 +285,13 @@ export default function EmployeeDetailPage() {
         </div>
       ) : employee ? (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <Card>
+                  <CardHeader>
+                    <CardTitle>Employee Details</CardTitle> 
+                  </CardHeader>
+                  <CardContent>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="firstName" className="block text-sm font-medium">First Name</Label>
               <Input
@@ -284,22 +332,22 @@ export default function EmployeeDetailPage() {
                 name="age"
                 value={employee.age}
                 onChange={handleChange}
+                readOnly
                 disabled={!editMode}
                 className="mt-1"
               />
             </div>
             <div>
               <Label htmlFor="gender" className="block text-sm font-medium">Gender</Label>
-              <Select value={employee.gender} onValueChange={(val) => setEmployee({ ...employee, gender: val })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select Gender" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Male">Male</SelectItem>
-                  <SelectItem value="Female">Female</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input
+                id="gender"
+                name="gender"
+                value={employee.gender}
+                onChange={handleChange}
+                readOnly
+                disabled={!editMode}
+                className="mt-1"
+              />
             </div>
             <div>
               <Label htmlFor="role" className="block text-sm font-medium">Role</Label>
@@ -359,11 +407,11 @@ export default function EmployeeDetailPage() {
               />
             </div>
           </div>
-          {editMode && (
-            <Button onClick={handleSave} disabled={loading}>
-              {loading ? "Saving..." : "Save Changes"}
-            </Button>
-          )}
+                  </CardContent>
+                </Card>
+                 
+         
+          
         </>
       ) : (
         <p>Employee not found</p>
@@ -382,14 +430,17 @@ export default function EmployeeDetailPage() {
       ) : (
         <div className="mt-4 space-y-4">
           {documents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
+            <div className="flex flex-col items-center justify-center py-8 border border-dashed rounded-lg">
+              <FileText className="h-10 w-10 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
+            </div>
           ) : (
             documents.map((doc, index) => (
               <Card key={doc.id} className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm">
-                      {doc.fileName} ({index + 1})
+                      {doc.fileName}  
                     </p>
                     <p className="text-xs text-muted-foreground">{doc.docType}</p>
                   </div>
@@ -464,8 +515,8 @@ export default function EmployeeDetailPage() {
           )}
         </div>
         <div className="flex justify-end mt-2">
-          <Button onClick={handleUploadDocument} disabled={!selectedFile || !docType || loading}>
-            {loading ? (
+          <Button size="sm" onClick={handleUploadDocument} disabled={!selectedFile || !docType || loading}>
+            {uploadingDoc ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Uploading...
@@ -488,7 +539,7 @@ export default function EmployeeDetailPage() {
           </DialogHeader>
           <DialogFooter>
             <Button variant="destructive" onClick={handleDeleteDocument}>
-              {loading ? (
+              {deletingDoc ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Deleting...

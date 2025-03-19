@@ -3,7 +3,8 @@ import React, { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import UploadDocumentsSection from "./upload-document/upload-document";
+import { Checkbox } from "@/components/ui/checkbox"; // Import the Checkbox from shadcn
+import UploadDocumentsSection from "./documents/upload-document";
 import AccountingSection from "./accounting/accounting";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -34,13 +35,14 @@ import { toast } from "sonner";
 // Import Tabs components
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HouseIcon, PanelsTopLeftIcon, BoxIcon, HomeIcon } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { db } from "@/firebase/firebase-config";
 import { doc, updateDoc } from "firebase/firestore";
 import { collection, getDocs } from "firebase/firestore";
 import { useAuth } from "@/context/auth-context";
-
+import ProjectProgress from "./components/project-progress";
+ 
 export interface ProjectDetail {
   id: string;
   typeOfWork: string;
@@ -52,6 +54,8 @@ export interface ProjectDetail {
   fleetNumber: string;
   status: string; // e.g. "open", "closed", "cancelled"
   cancellationReason?: string;
+  odometerReading: number;
+  workCompleted?: boolean; // New field to track if repairs/tires have been completed
 }
 
 interface ProjectDetailFormProps {
@@ -73,14 +77,14 @@ const LabelWithAsterisk: React.FC<{
 // Helper to get badge classes based on status.
 const getStatusBadgeClass = (status: string) => {
   switch (status.toLowerCase()) {
-    case "Open":
-      return "bg-green-100 text-green-800";
-    case "Closed":
-      return "bg-gray-100 text-gray-800";
-    case "Cancelled":
-      return "bg-red-100 text-red-800";
+    case "open":
+      return "bg-blue-100 text-blue-800 border-blue-300";
+    case "closed":
+      return "bg-green-100 text-green-800 border-green-300";
+    case "cancelled":
+      return "bg-red-100 text-red-800 border-red-300";
     default:
-      return "";
+      return "bg-gray-100 text-gray-800 border-gray-300";
   }
 };
 
@@ -152,6 +156,8 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
         partners: project.partners || "",
         fleetNumber: project.fleetNumber || "",
         status: project.status || "",
+        workCompleted: project.workCompleted || false, // Save the workCompleted state
+        odometerReading: project.odometerReading || 0,
       });
       toast.success("Project updated successfully!");
       if (onSave) onSave(project);
@@ -214,6 +220,21 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
     setShowCloseOptions(false);
   };
 
+  // Check if the work type is repair or tyre related
+  const isRepairOrTyreWork = () => {
+    const workType = project.typeOfWork.toLowerCase();
+    return workType.includes("repair") || workType.includes("tyre") || workType.includes("tire");
+  };
+
+  // Get appropriate label for the checkbox based on work type
+  const getWorkCompletedLabel = () => {
+    const workType = project.typeOfWork.toLowerCase();
+    if (workType.includes("tyre") || workType.includes("tire")) {
+      return "Tyres have been fitted";
+    }
+    return "Vehicle has been repaired";
+  };
+
   return (
     <form className="space-y-6">
       {/* Breadcrumbs */}
@@ -248,7 +269,7 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
             <p>•</p>
             <p className="text-muted-foreground font-bold">{project.location}</p>
             <p>•</p>
-            <Badge className={getStatusBadgeClass(project.status)}>
+            <Badge variant="outline" className={getStatusBadgeClass(project.status)}>
               {project.status}
             </Badge>
           </div>
@@ -332,127 +353,187 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
           </TabsList>
 
           <TabsContent value="overview">
-            {/* Project Information Section */}
-            <div className="mb-4 space-y-6">
-              <h2 className="text-xl font-bold mb-4">Project Information</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="id" className="block text-sm font-medium">
-                    Project ID
-                  </Label>
-                  <Input id="id" name="id" value={project.id} readOnly className="mt-1" />
-                </div>
-                <div>
-                  <LabelWithAsterisk htmlFor="partners" label="Partners" value={project.partners} />
-                  <Input
-                    id="partners"
-                    name="partners"
-                    value={project.partners}
-                    onChange={handleChange}
-                    placeholder="Enter partners separated by commas"
-                    className="mt-1"
-                    disabled={!isEditing}
-                  />
-                </div>
-                <div>
-                  <LabelWithAsterisk htmlFor="typeOfWork" label="Type of work" value={project.typeOfWork} />
-                  <Input
-                    id="typeOfWork"
-                    name="typeOfWork"
-                    value={project.typeOfWork}
-                    onChange={handleChange}
-                    placeholder="Enter type of work"
-                    className="mt-1"
-                    disabled={!isEditing}
-                  />
-                </div>
-                
-                <div>
-                  <LabelWithAsterisk htmlFor="projectDescription" label="Project Description" value={project.projectDescription} />
-                  <textarea
-                    id="projectDescription"
-                    name="projectDescription"
-                    value={project.projectDescription}
-                    onChange={handleChange}
-                    className="mt-1 block w-full border rounded p-2"
-                    disabled={!isEditing}
-                  />
-                </div>
-
-                {project.status.toLowerCase() === "cancelled" && (
-                  <div className="col-span-1">
-                    <Label htmlFor="cancellationReason" className="block text-sm font-medium">
-                      Cancellation Reason
-                    </Label>
-                    <Textarea
-                      id="cancellationReason"
-                      name="cancellationReason"
-                      value={project.cancellationReason || ""}
-                      readOnly
-                      className="mt-1"
-                    />
+            <div className="mb-4 grid grid-cols-3 gap-6">
+              {/* Project Information Section spanning 2 columns */}
+              <div className="col-span-2">
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg ">
+                        <span>Project Information</span> 
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="id" className="block text-sm font-medium">
+                        Project ID
+                      </Label>
+                      <Input id="id" name="id" value={project.id} readOnly className="mt-1" />
+                    </div>
+                    <div>
+                      <LabelWithAsterisk htmlFor="partners" label="Partners" value={project.partners} />
+                      <Input
+                        id="partners"
+                        name="partners"
+                        value={project.partners}
+                        onChange={handleChange}
+                        placeholder="Enter partners separated by commas"
+                        className="mt-1"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    <div>
+                      <LabelWithAsterisk htmlFor="typeOfWork" label="Type of work" value={project.typeOfWork} />
+                      <Input
+                        id="typeOfWork"
+                        name="typeOfWork"
+                        value={project.typeOfWork}
+                        onChange={handleChange}
+                        placeholder="Enter type of work"
+                        className="mt-1"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    <div>
+                    
+                    </div>
+                    <div>
+                      <LabelWithAsterisk
+                        htmlFor="projectDescription"
+                        label="Project Description"
+                        value={project.projectDescription}
+                      />
+                      <textarea
+                        id="projectDescription"
+                        name="projectDescription"
+                        value={project.projectDescription}
+                        onChange={handleChange}
+                        className="mt-1 block w-full border rounded p-2"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    {project.status.toLowerCase() === "cancelled" && (
+                      <div className="col-span-1">
+                        <Label htmlFor="cancellationReason" className="block text-sm font-medium">
+                          Cancellation Reason
+                        </Label>
+                        <Textarea
+                          id="cancellationReason"
+                          name="cancellationReason"
+                          value={project.cancellationReason || ""}
+                          readOnly
+                          className="mt-1"
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  <Separator className="mt-6 mb-4" />
+
+                {/* Vehicle Details Section */}
+                <div className="mb-6">
+                  <h2 className="text-md font-bold mb-4">Vehicle Details</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <LabelWithAsterisk
+                        htmlFor="registrationNumber"
+                        label="Registration Number"
+                        value={project.registrationNumber}
+                      />
+                      <Input
+                        id="registrationNumber"
+                        name="registrationNumber"
+                        value={project.registrationNumber}
+                        onChange={handleChange}
+                        className="mt-1"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    <div>
+                      <LabelWithAsterisk htmlFor="vehicleType" label="Vehicle Type" value={project.vehicleType} />
+                      <Input
+                        id="vehicleType"
+                        name="vehicleType"
+                        value={project.vehicleType}
+                        onChange={handleChange}
+                        className="mt-1"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    <div>
+                      <LabelWithAsterisk htmlFor="location" label="Location" value={project.location} />
+                      <Input
+                        id="location"
+                        name="location"
+                        value={project.location}
+                        onChange={handleChange}
+                        className="mt-1"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    <div>
+                      <LabelWithAsterisk htmlFor="fleetNumber" label="Fleet Number" value={project.fleetNumber} />
+                      <Input
+                        id="fleetNumber"
+                        name="fleetNumber"
+                        value={project.fleetNumber}
+                        onChange={handleChange}
+                        className="mt-1"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    <div>
+                      <LabelWithAsterisk htmlFor="odometerReading" label="Odometer reading" value={project.odometerReading.toString()} />
+                      <Input
+                        id="odometerReading"
+                        name="odometerReading"
+                        value={project.odometerReading.toString()}
+                        type="number"
+                        onChange={handleChange}
+                        className="mt-1"
+                        disabled={!isEditing}
+                      />
+                    </div>
+                    
+                    {/* Conditional Work Completion Checkbox */}
+                    {isRepairOrTyreWork() && (
+                      <div className="col-span-2">
+                        <div className="flex items-center space-x-2 mt-4">
+                          <Checkbox 
+                            id="workCompleted" 
+                            checked={project.workCompleted || false}
+                            onCheckedChange={(checked) => {
+                              setProject(prev => ({ ...prev, workCompleted: checked === true }));
+                            }}
+                            disabled={!isEditing}
+                          />
+                          <Label 
+                            htmlFor="workCompleted" 
+                            className="text-sm font-medium cursor-pointer"
+                          >
+                            {getWorkCompletedLabel()}
+                          </Label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                    </CardContent>
+                    </Card>
+                   
+                  
+                </div>
+
+                
+              </div>
+
+              {/* Project Progress Section taking 1 column */}
+              <div className="col-span-1">
+                <ProjectProgress projectId={project.id} />
               </div>
             </div>
-
-            <Separator className="mb-4" />
-
-            {/* Vehicle Details Section */}
-            <div className="mb-6">
-              <h2 className="text-xl font-bold mb-4">Vehicle Details</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <LabelWithAsterisk
-                    htmlFor="registrationNumber"
-                    label="Registration Number"
-                    value={project.registrationNumber}
-                  />
-                  <Input
-                    id="registrationNumber"
-                    name="registrationNumber"
-                    value={project.registrationNumber}
-                    onChange={handleChange}
-                    className="mt-1"
-                    disabled={!isEditing}
-                  />
-                </div>
-                <div>
-                  <LabelWithAsterisk htmlFor="vehicleType" label="Vehicle Type" value={project.vehicleType} />
-                  <Input
-                    id="vehicleType"
-                    name="vehicleType"
-                    value={project.vehicleType}
-                    onChange={handleChange}
-                    className="mt-1"
-                    disabled={!isEditing}
-                  />
-                </div>
-                <div>
-                  <LabelWithAsterisk htmlFor="location" label="Location" value={project.location} />
-                  <Input
-                    id="location"
-                    name="location"
-                    value={project.location}
-                    onChange={handleChange}
-                    className="mt-1"
-                    disabled={!isEditing}
-                  />
-                </div>
-                <div>
-                  <LabelWithAsterisk htmlFor="fleetNumber" label="Fleet Number" value={project.fleetNumber} />
-                  <Input
-                    id="fleetNumber"
-                    name="fleetNumber"
-                    value={project.fleetNumber}
-                    onChange={handleChange}
-                    className="mt-1"
-                    disabled={!isEditing}
-                  />
-                </div>
-              </div>
-            </div>
-          </TabsContent>
+          </TabsContent> 
           <TabsContent value="documentation" className="flex-1 overflow-auto">
             <UploadDocumentsSection projectId={project.id} />
           </TabsContent>

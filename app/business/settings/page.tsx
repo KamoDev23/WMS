@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Edit, CircleX, Loader2, Mail, Tag, User } from "lucide-react";
+import { Edit, CircleX, Loader2, Mail, Tag, User, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { db, storage } from "@/firebase/firebase-config";
 import { query, collection, where, getDocs, doc, getDoc, updateDoc } from "firebase/firestore";
@@ -18,21 +18,18 @@ import AccountingDocumentsManager from "@/app/components/business/accounting/acc
 import { useTheme } from "next-themes";
 import CompanyDocumentsManager from "@/app/components/business/accounting/company-documents-manager";
 import EmployeeDocumentsManager from "@/app/components/business/accounting/employee-documents-manager";
-import EmployeeManagementPage from "../employee-management/page";
 
 export default function SettingsPage() {
   const [userDetails, setUserDetails] = useState<User | null>(null);
+  const [originalUserDetails, setOriginalUserDetails] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [connectedUsers, setConnectedUsers] = useState<User[]>([]);
   const [isEditing, setIsEditing] = useState(false);
-  const [appSettings, setAppSettings] = useState({
-    autoSave: true,
-    notifications: true,
-  });
+  const [savingUserDetails, setSavingUserDetails] = useState(false);
+  const [disconnectingUser, setDisconnectingUser] = useState<string | null>(null);
   const { theme, setTheme } = useTheme();
-  const [language, setLanguage] = useState("en");
-  
-  // NEW: Profile picture states
+ 
+  // Profile picture states
   const [profilePicFile, setProfilePicFile] = useState<File | null>(null);
   const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
 
@@ -56,12 +53,16 @@ export default function SettingsPage() {
           const userDocRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userDocRef);
           if (userSnap.exists()) {
-            setUserDetails(userSnap.data() as User);
+            const userData = { id: user.uid, ...userSnap.data() } as User;
+            setUserDetails(userData);
+            setOriginalUserDetails(userData); // Save original data for cancel operation
           } else {
             console.error("User document does not exist");
+            toast.error("User profile not found");
           }
         } catch (error) {
           console.error("Error fetching user details:", error);
+          toast.error("Failed to load user profile");
         }
       }
       setLoading(false);
@@ -92,6 +93,7 @@ export default function SettingsPage() {
         setConnectedUsers(users);
       } catch (error) {
         console.error("Error fetching connected users:", error);
+        toast.error("Failed to load connected users");
       }
     };
     fetchConnectedUsers();
@@ -108,13 +110,35 @@ export default function SettingsPage() {
 
   const handleCancelEdit = () => {
     setIsEditing(false);
-    // Optionally revert changes if needed
+    // Revert changes by restoring the original data
+    if (originalUserDetails) {
+      setUserDetails(originalUserDetails);
+    }
   };
 
-  const handleSaveUserDetails = () => {
-    setIsEditing(false);
-    toast.success("User details saved!");
-    // Add Firestore update logic as needed
+  const handleSaveUserDetails = async () => {
+    if (!userDetails) return;
+    
+    setSavingUserDetails(true);
+    try {
+      // Save user details to Firestore
+      const userDocRef = doc(db, "users", userDetails.id);
+      await updateDoc(userDocRef, {
+        firstName: userDetails.firstName,
+        lastName: userDetails.lastName,
+        // Only update fields that are editable
+      });
+      
+      // Update the original user details
+      setOriginalUserDetails(userDetails);
+      toast.success("User details saved successfully");
+      setIsEditing(false);
+    } catch (error) {
+      console.error("Error saving user details:", error);
+      toast.error("Failed to save user details");
+    } finally {
+      setSavingUserDetails(false);
+    }
   };
 
   // --- Profile Picture Handlers ---
@@ -128,18 +152,19 @@ export default function SettingsPage() {
     if (!profilePicFile || !userDetails) return;
     setUploadingProfilePic(true);
     try {
-      // Use user.uid for storage path. Ensure userDetails has uid or fallback to auth user.uid.
-      const auth = getAuth();
-      const currentUser = auth.currentUser;
-      const uid = currentUser?.uid;
-      if (!uid) throw new Error("User ID not found");
-      const storageRef = ref(storage, `profile-pictures/${uid}`);
+      // Use user.uid for storage path
+      const storageRef = ref(storage, `profile-pictures/${userDetails.id}`);
       const snapshot = await uploadBytes(storageRef, profilePicFile);
       const url = await getDownloadURL(snapshot.ref);
+      
       // Update user document with new profilePicUrl
-      const userDocRef = doc(db, "users", uid);
+      const userDocRef = doc(db, "users", userDetails.id);
       await updateDoc(userDocRef, { profilePicUrl: url });
+      
+      // Update local state
       setUserDetails({ ...userDetails, profilePicUrl: url });
+      setOriginalUserDetails({ ...userDetails, profilePicUrl: url });
+      
       toast.success("Profile picture updated successfully");
     } catch (error) {
       console.error("Error uploading profile picture", error);
@@ -147,6 +172,27 @@ export default function SettingsPage() {
     } finally {
       setUploadingProfilePic(false);
       setProfilePicFile(null);
+    }
+  };
+
+  const handleDisconnectUser = async (userId: string) => {
+    if (!userDetails || !userId) return;
+    
+    setDisconnectingUser(userId);
+    try {
+      // Here we would implement the logic to disconnect a user
+      // For now, we'll just show a mock success message
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate server request
+      
+      // Update UI to reflect the change
+      setConnectedUsers(prev => prev.filter(user => user.id !== userId));
+      
+      toast.success("User disconnected successfully");
+    } catch (error) {
+      console.error("Error disconnecting user:", error);
+      toast.error("Failed to disconnect user");
+    } finally {
+      setDisconnectingUser(null);
     }
   };
 
@@ -165,7 +211,7 @@ export default function SettingsPage() {
       <div>
         <h2 className="text-2xl font-bold">Settings</h2>
         <p className="text-muted-foreground">
-          Add, remove, or edit your employees' details.
+          Manage your account, connected users, and application preferences.
         </p>
       </div>
 
@@ -177,14 +223,35 @@ export default function SettingsPage() {
             <div className="col-span-1 flex justify-end">
               {isEditing ? (
                 <div className="flex gap-2">
-                  <Button onClick={handleSaveUserDetails}>Save</Button>
-                  <Button variant="ghost" onClick={handleCancelEdit}>
-                    <CircleX size={16} />
+                  <Button 
+                    onClick={handleSaveUserDetails}
+                    disabled={savingUserDetails}
+                  >
+                    {savingUserDetails ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle size={16} className="mr-2" />
+                        Save
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={handleCancelEdit}
+                    disabled={savingUserDetails}
+                  >
+                    <CircleX size={16} className="mr-2" />
+                    Cancel
                   </Button>
                 </div>
               ) : (
                 <Button variant="outline" onClick={handleEditUserDetails}>
-                  <Edit size={16} />
+                  <Edit size={16} className="mr-2" />
+                  Edit
                 </Button>
               )}
             </div>
@@ -210,7 +277,7 @@ export default function SettingsPage() {
                   name="firstName"
                   value={userDetails.firstName || ""}
                   onChange={handleUserChange}
-                  disabled={!isEditing}
+                  disabled={!isEditing || savingUserDetails}
                   className="mt-1"
                 />
               </div>
@@ -223,7 +290,7 @@ export default function SettingsPage() {
                   name="lastName"
                   value={userDetails.lastName || ""}
                   onChange={handleUserChange}
-                  disabled={!isEditing}
+                  disabled={!isEditing || savingUserDetails}
                   className="mt-1"
                 />
               </div>
@@ -258,7 +325,7 @@ export default function SettingsPage() {
             </div>
 
             {/* Column 3: Profile picture upload */}
-            <div className="col-span-2 flex flex-col items-center">
+            <div className="col-span-3 flex flex-col items-center">
               <Avatar className="w-24 h-24">
                 <AvatarImage
                   src={
@@ -271,20 +338,45 @@ export default function SettingsPage() {
                   {userDetails.firstName ? userDetails.firstName[0] : "U"}
                 </AvatarFallback>
               </Avatar>
-              <label className="mt-4 cursor-pointer">
-                <Input
-                  type="file"
-                  className="hidden"
-                  onChange={handleProfilePicChange}
-                />
+              <div className="mt-4 flex flex-col gap-2 items-center">
+                <label className="cursor-pointer">
+                  <Input
+                    id="profilePicInput"
+                    type="file"
+                    className="hidden"
+                    onChange={handleProfilePicChange}
+                    accept="image/*"
+                    disabled={uploadingProfilePic}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => document.getElementById('profilePicInput')?.click()}
+                   >
+                    Choose File
+                  </Button>
+                </label>
+                {profilePicFile && (
+                  <p className="text-xs text-muted-foreground">
+                    Selected: {profilePicFile.name}
+                  </p>
+                )}
                 <Button
                   size="sm"
                   disabled={uploadingProfilePic || !profilePicFile}
                   onClick={handleProfilePicUpload}
+                  className="w-full"
                 >
-                  {uploadingProfilePic ? "Uploading..." : "Upload New Picture"}
+                  {uploadingProfilePic ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    "Upload Picture"
+                  )}
                 </Button>
-              </label>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -369,8 +461,20 @@ export default function SettingsPage() {
                             </div>
                           </div>
                           <div className="flex-shrink-0">
-                            <Button size="sm" variant="destructive">
-                              Disconnect
+                            <Button 
+                              size="sm" 
+                              variant="destructive"
+                              onClick={() => handleDisconnectUser(user.id)}
+                              disabled={disconnectingUser === user.id || user.id === userDetails.id}
+                            >
+                              {disconnectingUser === user.id ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                  Disconnecting...
+                                </>
+                              ) : (
+                                "Disconnect"
+                              )}
                             </Button>
                           </div>
                         </div>
@@ -427,70 +531,6 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
-
-      <Separator />
-
-      {/* Application Settings Section */}
-      {/* <Card className="p-6">
-        <CardHeader>
-          <h2 className="text-xl font-bold mb-2">Application Settings</h2>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-11 gap-4">
-            <div className="col-span-2">
-              <p className="text-sm text-muted-foreground">
-                Change application settings.
-              </p>
-            </div>
-            <div className="col-span-9 space-y-8">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between mr-10">
-                  <Label className="block text-sm font-bold mr-4">
-                    Auto-save Documents
-                  </Label>
-                  <div>
-                    <input
-                      type="checkbox"
-                      checked={appSettings.autoSave}
-                      onChange={(e) =>
-                        setAppSettings((prev) => ({
-                          ...prev,
-                          autoSave: e.target.checked,
-                        }))
-                      }
-                    />
-                    <span className="ml-2 text-sm">
-                      {appSettings.autoSave ? "Enabled" : "Disabled"}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between mr-10">
-                  <Label className="block text-sm font-bold mr-4">
-                    Enable Notifications
-                  </Label>
-                  <div>
-                    <input
-                      type="checkbox"
-                      checked={appSettings.notifications}
-                      onChange={(e) =>
-                        setAppSettings((prev) => ({
-                          ...prev,
-                          notifications: e.target.checked,
-                        }))
-                      }
-                    />
-                    <span className="ml-2 text-sm">
-                      {appSettings.notifications ? "Enabled" : "Disabled"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card> */}
     </div>
   );
 }
-
- 

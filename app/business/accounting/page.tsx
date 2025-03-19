@@ -29,7 +29,7 @@ import {
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/firebase/firebase-config";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 // Import dialog components (adjust if needed)
 import {
@@ -346,9 +346,13 @@ export default function AccountingPage() {
       </div>
 
       <Separator />
-      
-      {/* Date Range Picker */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+      <Card>
+          <CardHeader>
+            <CardTitle>Company Documents</CardTitle> 
+          </CardHeader>
+          <CardContent>
+            {/* Date Range Picker */}
+      <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-2">
         <DatePickerWithRange value={dateRange} onSelect={setDateRange} />
       </div>
 
@@ -385,7 +389,7 @@ export default function AccountingPage() {
               </p>
             ) : (
               docsForCategory.map((doc, index) => (
-                <Card key={doc.id} className="p-4 mb-2">
+                <Card key={doc.id} className="bg-sidebar p-4 mb-2">
                   <div className="flex items-center justify-between">
                     <div className="text-sm">
                       {doc.fileName}
@@ -415,10 +419,16 @@ export default function AccountingPage() {
             )}
           </AccordionContent>
         </AccordionItem>
+        <div></div>
       </Accordion>
     );
   })}
       </div>
+          </CardContent>
+        </Card>
+         
+      
+      
 
       {/* Upload Section */}
       <Card className="p-4">

@@ -96,19 +96,10 @@ export default function ProjectsListPage({
 
   return (
     <div className="">
-      <div className="flex justify-between items-center mb-4">
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as "table" | "carousel")}
-          className="w-full"
-        >
-          <div className="flex justify-between items-center">
-            <TabsList>
-              <TabsTrigger value="table">Table View</TabsTrigger>
-              {/* <TabsTrigger value="carousel">Card View</TabsTrigger> */}
-            </TabsList>
-            
-            <Button 
+      <div className="  items-center mb-4">
+         
+      <div className="flex justify-end px-2">
+        <Button 
               variant="outline" 
               size="sm" 
               onClick={handleRefresh}
@@ -117,15 +108,8 @@ export default function ProjectsListPage({
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>
-          </div>
-          
-          <TabsContent value="table" className="">
-            <ProjectsTable projects={projects} />
-          </TabsContent>
-          {/* <TabsContent value="carousel" className="">
-            <ProjectsCarouselView projects={projects} />
-          </TabsContent> */}
-        </Tabs>
+            </div>
+        <ProjectsTable projects={projects} />
       </div>
     </div>
   );
