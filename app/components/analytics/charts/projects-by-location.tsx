@@ -163,7 +163,7 @@ export function ProjectsByLocationChart({ merchantCode }: ProjectsByLocationChar
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <ChartTooltip content={<ChartTooltipContent nameKey="projects" hideLabel />} />
-              <Pie data={transformedData} dataKey="value" outerRadius={80}>
+              <Pie data={transformedData} dataKey="value" outerRadius={120}>
                 {transformedData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.fill} />
                 ))}

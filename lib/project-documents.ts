@@ -2,7 +2,7 @@ import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, getDoc, query, 
 import { storage } from "@/firebase/firebase-config";
 import { ref, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
  import { db } from "@/firebase/firebase-config";
-import { UploadedDocument } from "@/app/components/project/upload-document/upload-document";
+import { UploadedDocument } from "@/app/components/project/documents/upload-document";
 
 /**
  * Fetch all documents for a given project under the correct merchant.

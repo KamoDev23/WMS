@@ -14,7 +14,7 @@ interface UserData {
   lastName?: string;
   merchantCode?: string;
   role?: string;
-  avatar?: string;
+  profilePicUrl?: string;
 }
 
 interface AuthContextType {

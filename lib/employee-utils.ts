@@ -128,6 +128,7 @@ export const saveEmployee = async (merchantCode: string, employee: Employee) => 
  */
 export const fetchEmployeeDocuments = async (merchantCode: string, employeeId: string): Promise<UploadedDocument[]> => {
   try {
+    console.log("Fetching documents for employee", employeeId);
     const querySnapshot = await getDocs(collection(db, "merchants", merchantCode, "employees", employeeId, "documents"));
     return querySnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as UploadedDocument));
   } catch (error) {

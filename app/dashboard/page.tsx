@@ -1,11 +1,10 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import AnalyticsSection from "../components/analytics/analytics-section";
-import ProjectHistoryTable from "../components/project/tables/project-history-table";
+import ProjectHistoryTable from "../components/projects/tables/project-history-table";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { StatsGrid } from "../components/customs/stats-grid";
-import {
+ import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
@@ -17,10 +16,11 @@ import { HomeIcon, FolderOpen, CheckCircle, Target, TrendingUp, Loader2 } from "
 import { Separator } from "@/components/ui/separator";
 import { collection, doc, getDocs, setDoc, query, where } from "firebase/firestore";
 import { db } from "@/firebase/firebase-config";
-import CreateProjectModal, { NewProject } from "../components/project/create-project-modal";
+import CreateProjectModal, { NewProject } from "../components/project/components/create-project-modal";
 import { Project } from "@/types/project";
 import { fetchProjects, fetchProjectsForMerchant } from "../../lib/fetch-projects";
 import { useAuth } from "@/context/auth-context";
+import { StatsGrid } from "../components/customs/stats-grid";
 
 const DashboardPage: React.FC = () => {
   const { user } = useAuth();
@@ -62,10 +62,14 @@ const DashboardPage: React.FC = () => {
   }
 
   // Calculate metrics
-  const openCount = projects.filter((p) => p.status === "Open").length;
-  const closedCount = projects.filter((p) => p.status === "Closed").length;
-  const totalCount = projects.length;
-  const completionRate = totalCount > 0 ? ((closedCount / totalCount) * 100).toFixed(1) + "%" : "0%";
+  // Instead of calculating stats directly from projects, filter out "Cancelled" projects first.
+  const validProjects = projects.filter((p) => p.status !== "Cancelled");
+
+  const openCount = validProjects.filter((p) => p.status === "Open").length;
+  const closedCount = validProjects.filter((p) => p.status === "Closed").length;
+  const totalCount = validProjects.length;
+  const completionRate =
+    totalCount > 0 ? ((closedCount / totalCount) * 100).toFixed(1) + "%" : "0%";
 
   const generateProjectId = (registrationNumber: string, projects: Project[]): string => {
     const normalized = registrationNumber.replace(/\s+/g, "").toUpperCase();
@@ -165,15 +169,14 @@ const DashboardPage: React.FC = () => {
         <Separator />
         
         <div className="flex justify-between mt-6">
-        <h2 className="text-2xl font-bold">
-        Project Stats
-      </h2>
-      <div className="">
-          <Button size="sm" onClick={() => setIsModalOpen(true)} className="mb-4">
-            Create New Project
-          </Button>
-
-        </div>
+          <h2 className="text-2xl font-bold">
+            Project Stats
+          </h2>
+          <div className="">
+            <Button size="sm" onClick={() => setIsModalOpen(true)} className="mb-4">
+              Create New Project
+            </Button>
+          </div>
         </div>
         
         {/* Display project stats */}
@@ -184,7 +187,8 @@ const DashboardPage: React.FC = () => {
               <p className="mt-2">Loading project stats...</p>
             </div>
           ) : (
-            <StatsGrid stats={stats} />
+            // Pass projects to the StatsGrid component
+            <StatsGrid stats={stats} projects={validProjects} />
           )}
         </div>
 
