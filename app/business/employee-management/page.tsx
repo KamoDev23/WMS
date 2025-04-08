@@ -37,7 +37,8 @@ import {
   Loader2, 
   AlertCircle, 
   CheckCircle, 
-  Info 
+  Info, 
+  Check
 } from "lucide-react";
 import { validateSAID } from "@/lib/age-extraction";
 
@@ -353,7 +354,7 @@ export default function EmployeeManagementPage() {
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                            <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
                           </TooltipTrigger>
                           <TooltipContent>
                             <p>Valid ID Number</p>

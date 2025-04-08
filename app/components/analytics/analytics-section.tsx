@@ -27,7 +27,7 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ merchantCode
     <section className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Analytics Dashboard</h2>
-        <Select defaultValue="month" onValueChange={handleTimeRangeChange}>
+        {/* <Select defaultValue="month" onValueChange={handleTimeRangeChange}>
           <SelectTrigger className="w-32">
             <SelectValue placeholder="Select Range" />
           </SelectTrigger>
@@ -37,7 +37,7 @@ export const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ merchantCode
             <SelectItem value="quarter">Last Quarter</SelectItem>
             <SelectItem value="year">Last Year</SelectItem>
           </SelectContent>
-        </Select>
+        </Select> */}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

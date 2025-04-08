@@ -8,5 +8,6 @@ export interface Project {
     dateClosed?: string;
     status: string;
     odometerReading: number;
+    isBacklog?: boolean;
   }
   

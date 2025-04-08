@@ -6,10 +6,13 @@ interface ProfileData {
   companyName: string;
   address: string;
   companyEmail?: string;
-  phoneNumber?: string;
-  websiteUrl?: string;
+  phoneNumber?: string; 
+  vatNumber?: string;
   companyLogo?: string;
-  tagline?: string;
+  bankName?: string;
+  accountHolder?: string;
+  accountNumber?: string;
+  branchCode?: string;
 }
 
 interface ProfileDocument {

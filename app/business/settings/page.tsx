@@ -14,10 +14,9 @@ import { query, collection, where, getDocs, doc, getDoc, updateDoc } from "fireb
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { onAuthStateChanged, getAuth } from "firebase/auth";
 import { ThemeSelector } from "@/app/components/theme/theme-selector";
-import AccountingDocumentsManager from "@/app/components/business/accounting/accounting-documents-manager";
-import { useTheme } from "next-themes";
-import CompanyDocumentsManager from "@/app/components/business/accounting/company-documents-manager";
-import EmployeeDocumentsManager from "@/app/components/business/accounting/employee-documents-manager";
+ import { useTheme } from "next-themes"; 
+import { ClientDialog } from "@/app/components/business/settings/client-dialog";
+import DeleteConfirmationDialog from "@/app/components/customs/delete-confirmation-dialog";
 
 export default function SettingsPage() {
   const [userDetails, setUserDetails] = useState<User | null>(null);
@@ -33,6 +32,15 @@ export default function SettingsPage() {
   const [profilePicFile, setProfilePicFile] = useState<File | null>(null);
   const [uploadingProfilePic, setUploadingProfilePic] = useState(false);
 
+  const [clients, setClients] = useState<Client[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [savingClient, setSavingClient] = useState(false);
+  const [editClient, setEditClient] = useState<Client | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
+  const [isDeletingClient, setIsDeletingClient] = useState(false);
+
+
   interface User {
     id: string;
     email: string;
@@ -42,6 +50,14 @@ export default function SettingsPage() {
     role: string;
     createdAt: string;
     profilePicUrl?: string;
+  }
+
+  interface Client {
+    id: string;
+    contactPerson: string;
+    clientName: string;
+    address: string;
+    vat: string;
   }
 
   // Fetch user details from Firebase Auth/Firestore
@@ -98,6 +114,27 @@ export default function SettingsPage() {
     };
     fetchConnectedUsers();
   }, [userDetails?.merchantCode]);
+
+  // Fetch clients
+  useEffect(() => {
+    const fetchClients = async () => {
+      if (!userDetails?.merchantCode) return;
+  
+      try {
+        const merchantDoc = await getDoc(doc(db, "merchants", userDetails.merchantCode));
+        if (merchantDoc.exists()) {
+          const data = merchantDoc.data();
+          setClients(data.clients || []);
+        }
+      } catch (error) {
+        console.error("Error fetching clients:", error);
+        toast.error("Failed to load clients");
+      }
+    };
+  
+    fetchClients();
+  }, [userDetails?.merchantCode]);
+  
 
   const handleUserChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -195,6 +232,63 @@ export default function SettingsPage() {
       setDisconnectingUser(null);
     }
   };
+
+  const handleSaveClient = async (client: Client) => {
+    if (!userDetails?.merchantCode) return;
+  
+    setSavingClient(true);
+    const updatedClients = (() => {
+      const exists = clients.find((c) => c.id === client.id);
+      if (exists) {
+        return clients.map((c) => (c.id === client.id ? client : c));
+      } else {
+        return [...clients, client];
+      }
+    })();
+  
+    try {
+      const merchantDocRef = doc(db, "merchants", userDetails.merchantCode);
+      await updateDoc(merchantDocRef, {
+        clients: updatedClients,
+      });
+  
+      setClients(updatedClients);
+      setSavingClient(false);
+      toast.success(`Client ${client.clientName} saved`);
+      
+    } catch (error) {
+      console.error("Error saving client:", error);
+      toast.error("Failed to save client");
+    } finally {
+     
+      setDialogOpen(false); // Close manually from parent
+    }
+  };  
+
+  const confirmDeleteClient = async () => {
+    if (!userDetails?.merchantCode || !clientToDelete) return;
+  
+    setIsDeletingClient(true);
+    const updated = clients.filter((c) => c.id !== clientToDelete.id);
+  
+    try {
+      const merchantDocRef = doc(db, "merchants", userDetails.merchantCode);
+      await updateDoc(merchantDocRef, { clients: updated });
+  
+      setClients(updated);
+      toast.success(`Client "${clientToDelete.clientName}" removed`);
+    } catch (error) {
+      console.error("Error removing client:", error);
+      toast.error("Failed to remove client");
+    } finally {
+      setIsDeletingClient(false);
+      setDeleteDialogOpen(false);
+      setClientToDelete(null);
+    }
+  };
+  
+  
+  
 
   if (loading)
     return (
@@ -490,6 +584,63 @@ export default function SettingsPage() {
 
       <Separator />
 
+      {/* Documentation Section */}
+            <Card className="p-6">
+              <CardHeader>
+                <h2 className="text-xl font-bold mb-2">Client Management</h2>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-11 gap-4">
+                  <div className="col-span-2">
+                    <p className="text-sm text-muted-foreground">
+                      Manage your clients.
+                    </p>
+                  </div>
+                  <div className="col-span-9 space-y-8">
+                  <div className="flex justify-end mb-4">
+                    <Button onClick={() => { setEditClient(null); setDialogOpen(true); }}>
+                      + Add Client
+                    </Button>
+                  </div>
+
+                  <ul className="space-y-4">
+                    {clients.map((client) => (
+                      <Card key={client.id} className="p-4">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="font-semibold">{client.clientName}</p>
+                            <p className="text-sm text-muted-foreground">Contact: {client.contactPerson}</p>
+                            <p className="text-sm text-muted-foreground">Address: {client.address}</p>
+                            <p className="text-sm text-muted-foreground">VAT: {client.vat}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => { setEditClient(client); setDialogOpen(true); }}>
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => {
+                                setClientToDelete(client);
+                                setDeleteDialogOpen(true);
+                              }}
+                            >
+                              Remove
+                            </Button>
+
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </ul>
+
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+      <Separator />
+            
       {/* Personalisation Section */}
       <Card className="p-6">
         <CardHeader>
@@ -509,28 +660,25 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Separator />
+      <ClientDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onSave={handleSaveClient}
+        client={editClient}
+        isSaving={savingClient}
+      />
 
-      {/* Documentation Section */}
-      <Card className="p-6">
-        <CardHeader>
-          <h2 className="text-xl font-bold mb-2">Documentation</h2>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-11 gap-4">
-            <div className="col-span-2">
-              <p className="text-sm text-muted-foreground">
-                Add documentation options.
-              </p>
-            </div>
-            <div className="col-span-9 space-y-8">
-              <CompanyDocumentsManager merchantCode={userDetails.merchantCode} />
-              <EmployeeDocumentsManager merchantCode={userDetails.merchantCode} />
-              <AccountingDocumentsManager merchantCode={userDetails.merchantCode} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+
+      <DeleteConfirmationDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        documentName={clientToDelete?.clientName || ""}
+        onConfirm={confirmDeleteClient}
+        isDeleting={isDeletingClient}
+      />
+
     </div>
   );
 }
+
+

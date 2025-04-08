@@ -69,7 +69,7 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
               </div>
               <span className="sr-only">Acme Inc.</span>
             </a>
-            <h1 className="text-xl font-bold">WMS</h1>
+            <h1 className="text-xl font-bold">Smart Line</h1>
           </div>
 
           <div className="flex flex-col gap-6">

@@ -2,25 +2,26 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { db, storage } from "@/firebase/firebase-config";
+import { db } from "@/firebase/firebase-config";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-  SelectGroup,
-} from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/context/auth-context";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, CircleX, FileText, HomeIcon } from "lucide-react";
-import { useDropzone } from "react-dropzone";
+import { 
+  Loader2, 
+  CircleX, 
+  FileText, 
+  HomeIcon, 
+  Plus, 
+  CalendarIcon, 
+  Download,
+  Edit, 
+  Eye, 
+  MoreVertical, 
+  Trash 
+} from "lucide-react";
 import {
   Dialog,
   DialogClose,
@@ -31,16 +32,29 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   deleteEmployeeDocument,
   fetchEmployeeById,
   fetchEmployeeDocuments,
   fetchUserMerchantCode,
   saveEmployee,
   uploadEmployeeDocument,
+  updateEmployeeDocumentExpiry
 } from "@/lib/employee-utils";
-import { set } from "date-fns";
-import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator, BreadcrumbPage } from "@/components/ui/breadcrumb";
-
+import { format } from "date-fns";
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator, BreadcrumbPage } from "@/components/ui/breadcrumb"; 
+import EmployeeUploadDialog from "@/app/components/business/employee-management/upload-document-dialog";
+import EmployeeExpiryDialog from "@/app/components/business/components/expiry-date-dialog";
+import EditDocumentDialog from "@/app/components/business/employee-management/edit-document-dialog";
+import FullscreenDocumentViewer from "@/app/components/business/components/fullscreen-document-viewer";
+import EmployeeDocumentDownloader from "@/app/components/business/employee-management/employee document-downloader";
+import { toast } from "sonner";
+ 
 interface Employee {
   id: string;
   firstName: string;
@@ -60,8 +74,9 @@ interface UploadedDocument {
   id: string;
   fileName: string;
   url: string;
-  docType: "ID Copy" | "Employment Contract" | "Proof of Address" | "Other";
+  docType: string;
   employeeId: string;
+  expiryDate?: string; // ISO string format
 }
 
 export default function EmployeeDetailPage() {
@@ -75,98 +90,77 @@ export default function EmployeeDetailPage() {
   const [savingEmployeeDetails, setSavingEmployeeDetails] = useState<boolean>(false);
   const [uploadingDoc, setUploadingDoc] = useState<boolean>(false);
   const [deletingDoc, setDeletingDoc] = useState<boolean>(false);
+  const [savingExpiryDate, setSavingExpiryDate] = useState<boolean>(false);
 
   // Document states
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  // For document category from merchant doc (dynamically fetched)
-  const [documentCategories, setDocumentCategories] = useState<string[]>([]);
   const [docType, setDocType] = useState<string>("");
+  const [hasExpiry, setHasExpiry] = useState<boolean>(false);
+  
+  // Recently uploaded document for expiry date setting
+  const [recentlyUploadedDoc, setRecentlyUploadedDoc] = useState<UploadedDocument | null>(null);
 
-  const [loadingDocuments, setLoadingDocuments] = useState<boolean>(false);
-  const [docToDelete, setDocToDelete] = useState<{ id: string; fileName: string } | null>(null);
+  // Dialog states
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [expiryDateDialogOpen, setExpiryDateDialogOpen] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<{ id: string; fileName: string } | null>(null);
+  
+  // New state for document editing and viewing
+  const [editDocDialogOpen, setEditDocDialogOpen] = useState(false);
+  const [documentToEdit, setDocumentToEdit] = useState<UploadedDocument | null>(null);
+  const [viewingDocumentUrl, setViewingDocumentUrl] = useState<string | null>(null);
+  const [fullscreenViewerOpen, setFullscreenViewerOpen] = useState(false);
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
 
-  const docTypeOptions = ["ID Copy", "Employment Contract", "Proof of Address", "Other"];
-
-
-
-  // Fetch document categories from the merchant document when merchantCode is available
+  // Fetch employee details from Firestore
   useEffect(() => {
-    if (!merchantCode) return;
-    const fetchDocumentCategories = async () => {
-      try {
-        const merchantDocRef = doc(db, "merchants", merchantCode);
-        const merchantSnap = await getDoc(merchantDocRef);
-        if (merchantSnap.exists()) {
-          const data = merchantSnap.data();
-          const categories = data.employeeDocumentOptions || [];
-          setDocumentCategories(categories);
-          // Set default if not set
-          if (!docType && categories.length > 0) {
-            setDocType(categories[0]);
-          }
-        } else {
-          setDocumentCategories([]);
-        }
-      } catch (error) {
-        console.error("Error fetching document categories:", error);
-        setDocumentCategories([]);
-      }
-    };
-    fetchDocumentCategories();
-  }, [merchantCode]);
+    if (!user || !id) return;
 
-    // Fetch employee details from Firestore
-    useEffect(() => {
-      if (!user || !id) return;
-  
-      const loadEmployeeData = async () => {
-        try {
-          setLoading(true);
-  
-          // Get the merchantCode for the current user
-          const userMerchantCode = await fetchUserMerchantCode();
-          if (!userMerchantCode) {
-            console.error("Merchant code not found");
-            return;
-          }
-  
-          setMerchantCode(userMerchantCode);
-  
-          // Fetch employee with the merchant code
-          const employeeData = await fetchEmployeeById(userMerchantCode, id);
-          if (employeeData) {
-            setEmployee({ ...employeeData, merchantCode: userMerchantCode });
-            // Fetch documents after employee is loaded
-            await fetchDocuments();
-          }
-        } catch (error) {
-          console.error("Error loading employee data:", error);
-        } finally {
-          setLoading(false);
-        }
-      };
-  
-      loadEmployeeData();
-    }, [user, id]);
-  
-    const fetchDocuments = async () => {
-      console.log("Fetching documents...");
-      console.log("Merchant code:", merchantCode);
-      console.log("Employee ID:", employee?.id);
-      if (!merchantCode || !employee?.id) return;
-  
-      setLoadingDocuments(true);
+    const loadEmployeeData = async () => {
       try {
-        const docs = await fetchEmployeeDocuments(merchantCode, employee.id);
-        setDocuments(docs);
+        setLoading(true);
+
+        // Get the merchantCode for the current user
+        const userMerchantCode = await fetchUserMerchantCode();
+        if (!userMerchantCode) {
+          console.error("Merchant code not found");
+          return;
+        }
+
+        setMerchantCode(userMerchantCode);
+
+        // Fetch employee with the merchant code
+        const employeeData = await fetchEmployeeById(userMerchantCode, id);
+        if (employeeData) {
+          setEmployee({ ...employeeData, merchantCode: userMerchantCode });
+          // Fetch documents after employee is loaded
+          await fetchDocuments(userMerchantCode, employeeData.id);
+        }
       } catch (error) {
-        console.error("Error fetching documents:", error);
+        console.error("Error loading employee data:", error);
       } finally {
-        setLoadingDocuments(false);
+        setLoading(false);
       }
     };
+
+    loadEmployeeData();
+  }, [user, id]);
+
+  const fetchDocuments = async (merchantCode: string, employeeId: string) => {
+    if (!merchantCode || !employeeId) return;
+
+    setLoading(true);
+    try {
+      const docs = await fetchEmployeeDocuments(merchantCode, employeeId);
+      setDocuments(docs);
+    } catch (error) {
+      console.error("Error fetching documents:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Handle input changes for employee details
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,7 +172,7 @@ export default function EmployeeDetailPage() {
     if (!merchantCode || !employee) return;
     setSavingEmployeeDetails(true);
     await saveEmployee(merchantCode, employee);
-    setSavingEmployeeDetails(false)
+    setSavingEmployeeDetails(false);
     setEditMode(false);
   };
 
@@ -187,6 +181,7 @@ export default function EmployeeDetailPage() {
     if (!selectedFile || !merchantCode || !employee) return;
     setUploadingDoc(true);
     try {
+      // Upload the document first
       const newDoc = await uploadEmployeeDocument(
         merchantCode,
         employee.id,
@@ -195,12 +190,63 @@ export default function EmployeeDetailPage() {
       );
       if (newDoc) {
         setDocuments((prev) => [...prev, newDoc]);
+        
+        // If document has expiry date, open the expiry date dialog
+        if (hasExpiry) {
+          setRecentlyUploadedDoc(newDoc);
+          setUploadDialogOpen(false); // Close upload dialog
+          setExpiryDateDialogOpen(true); // Open expiry date dialog
+        } else {
+          // Otherwise just close the upload dialog
+          setUploadDialogOpen(false);
+          setSelectedFile(null);
+          setDocType("");
+          setHasExpiry(false);
+        }
+        toast.success("Document successfuly uploaded")
       }
     } catch (error) {
       console.error("Error uploading document:", error);
+      toast.error("Error uploading document")
     } finally {
       setUploadingDoc(false);
+    }
+  };
+
+  const handleSaveExpiryDate = async (date: Date) => {
+    if (!merchantCode || !employee || !recentlyUploadedDoc) return;
+    
+    setSavingExpiryDate(true);
+    try {
+      // Update the document with expiry date in Firestore
+      await updateEmployeeDocumentExpiry(
+        merchantCode,
+        employee.id,
+        recentlyUploadedDoc.id,
+        date
+      );
+      
+      // Update local state
+      const expiryDateString = date.toISOString();
+      setDocuments(docs => 
+        docs.map(doc => 
+          doc.id === recentlyUploadedDoc.id 
+            ? { ...doc, expiryDate: expiryDateString } 
+            : doc
+        )
+      );
+      
+      setExpiryDateDialogOpen(false);
+      setRecentlyUploadedDoc(null);
       setSelectedFile(null);
+      setDocType("");
+      setHasExpiry(false);
+      toast.success("Expiry date saved successfuly")
+    } catch (error) {
+      console.error("Error saving expiry date:", error);
+      toast.error("Error saving expiry date")
+    } finally {
+      setSavingExpiryDate(false);
     }
   };
 
@@ -210,28 +256,113 @@ export default function EmployeeDetailPage() {
     try {
       await deleteEmployeeDocument(merchantCode, employee.id, docToDelete.id, docToDelete.fileName);
       setDocuments((prev) => prev.filter((doc) => doc.id !== docToDelete.id));
+      setShowDeleteDialog(false);
     } catch (error) {
       console.error("Error deleting document:", error);
     } finally {
       setDeletingDoc(false);
-      setShowDeleteDialog(false);
       setDocToDelete(null);
     }
   };
 
-  const handleViewDocument = (url: string) => {
-    window.open(url, "_blank");
+  const handleViewDocument = (url: string, fileName: string) => {
+    setViewingDocumentUrl(url);
+    setFullscreenViewerOpen(true);
   };
 
-  // Dropzone setup
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop: (acceptedFiles) => {
-      if (acceptedFiles && acceptedFiles.length > 0) {
-        setSelectedFile(acceptedFiles[0]);
+  // Add function to handle document download
+  const handleDownloadDocument = async (url: string, fileName: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      
+      // Create a download link
+      const downloadLink = document.createElement('a');
+      downloadLink.href = URL.createObjectURL(blob);
+      downloadLink.download = fileName;
+      
+      // Append to the document, click it, and remove it
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+    } catch (error) {
+      console.error("Error downloading document:", error);
+    }
+  };
+  
+  // Add function to handle editing a document
+  const handleEditDocument = (doc: UploadedDocument) => {
+    setDocumentToEdit(doc);
+    setDocType(doc.docType);
+    setHasExpiry(!!doc.expiryDate);
+    setSelectedFile(null);
+    setEditDocDialogOpen(true);
+  };
+  
+  // Function to handle document update submission
+  const handleUpdateDocument = async () => {
+    if (!selectedFile || !merchantCode || !employee || !documentToEdit) return;
+    
+    setUploadingDoc(true);
+    try {
+      // First delete the old document
+      await deleteEmployeeDocument(
+        merchantCode, 
+        employee.id, 
+        documentToEdit.id, 
+        documentToEdit.fileName
+      );
+      
+      // Then upload the new document with the same docType
+      const newDoc = await uploadEmployeeDocument(
+        merchantCode,
+        employee.id,
+        selectedFile,
+        docType // Reuse the same document type
+      );
+      
+      if (newDoc) {
+        // Replace the old document in the documents array
+        setDocuments(prev => prev.map(doc => 
+          doc.id === documentToEdit.id ? newDoc : doc
+        ));
+        
+        // If document has expiry date, open the expiry date dialog
+        if (hasExpiry) {
+          setRecentlyUploadedDoc(newDoc);
+          setEditDocDialogOpen(false); // Close edit dialog
+          setExpiryDateDialogOpen(true); // Open expiry date dialog
+        } else {
+          // Reset state and close dialog
+          setEditDocDialogOpen(false);
+          setSelectedFile(null);
+          setDocumentToEdit(null);
+        }
       }
-    },
-    multiple: false,
-  });
+    } catch (error) {
+      console.error("Error updating document:", error);
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const openUploadDialog = () => {
+    setSelectedFile(null);
+    setDocType("");
+    setHasExpiry(false);
+    setUploadDialogOpen(true);
+  };
+
+  // Format expiry date for display
+  const formatExpiryDate = (dateString?: string) => {
+    if (!dateString) return null;
+    try {
+      return format(new Date(dateString), "MMM d, yyyy");
+    } catch (error) {
+      console.error("Invalid date format:", dateString);
+      return "Invalid date";
+    }
+  };
 
   return (
     <section className="space-y-6">
@@ -241,38 +372,38 @@ export default function EmployeeDetailPage() {
           <h2 className="text-2xl font-bold">Employee Management</h2>
           <p className="text-muted-foregroun mb-4">Edit employee details and documentation.</p>
           <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <HomeIcon size={16} aria-hidden="true" />
-              <BreadcrumbLink href="/">Settings</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbLink href="/projects">Employee Management</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{employee?.id}</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <HomeIcon size={16} aria-hidden="true" />
+                <BreadcrumbLink href="/">Settings</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbLink href="/projects">Employee Management</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>{employee?.id}</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
         </div>
         <div className="space-x-2">
-        {editMode && (
+          {editMode && (
             <Button size="sm" onClick={handleSave} disabled={loading}>
               {savingEmployeeDetails ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Save Changes"
-            )}
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
             </Button>
           )}
-        <Button size="sm" variant="outline" onClick={() => setEditMode(!editMode)}>
-          {editMode ? "Cancel" : "Edit"}
-        </Button>
+          <Button size="sm" variant="outline" onClick={() => setEditMode(!editMode)}>
+            {editMode ? "Cancel" : "Edit"}
+          </Button>
         </div>
       </div>
 
@@ -285,133 +416,129 @@ export default function EmployeeDetailPage() {
         </div>
       ) : employee ? (
         <>
-
-        <Card>
-                  <CardHeader>
-                    <CardTitle>Employee Details</CardTitle> 
-                  </CardHeader>
-                  <CardContent>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="firstName" className="block text-sm font-medium">First Name</Label>
-              <Input
-                id="firstName"
-                name="firstName"
-                value={employee.firstName}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="lastName" className="block text-sm font-medium">Last Name</Label>
-              <Input
-                id="lastName"
-                name="lastName"
-                value={employee.lastName}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="idNumber" className="block text-sm font-medium">ID Number</Label>
-              <Input
-                id="idNumber"
-                name="idNumber"
-                value={employee.idNumber}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="age" className="block text-sm font-medium">Age</Label>
-              <Input
-                id="age"
-                name="age"
-                value={employee.age}
-                onChange={handleChange}
-                readOnly
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="gender" className="block text-sm font-medium">Gender</Label>
-              <Input
-                id="gender"
-                name="gender"
-                value={employee.gender}
-                onChange={handleChange}
-                readOnly
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="role" className="block text-sm font-medium">Role</Label>
-              <Input
-                id="role"
-                name="role"
-                value={employee.role}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="dateOfHire" className="block text-sm font-medium">Date of Hire</Label>
-              <Input
-                id="dateOfHire"
-                name="dateOfHire"
-                type="date"
-                value={employee.dateOfHire}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="phoneNumber" className="block text-sm font-medium">Phone Number</Label>
-              <Input
-                id="phoneNumber"
-                name="phoneNumber"
-                value={employee.phoneNumber}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="email" className="block text-sm font-medium">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                value={employee.email}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label htmlFor="address" className="block text-sm font-medium">Address</Label>
-              <Input
-                id="address"
-                name="address"
-                value={employee.address}
-                onChange={handleChange}
-                disabled={!editMode}
-                className="mt-1"
-              />
-            </div>
-          </div>
-                  </CardContent>
-                </Card>
-                 
-         
-          
+          <Card>
+            <CardHeader>
+              <CardTitle>Employee Details</CardTitle> 
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="firstName" className="block text-sm font-medium">First Name</Label>
+                  <Input
+                    id="firstName"
+                    name="firstName"
+                    value={employee.firstName}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="lastName" className="block text-sm font-medium">Last Name</Label>
+                  <Input
+                    id="lastName"
+                    name="lastName"
+                    value={employee.lastName}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="idNumber" className="block text-sm font-medium">ID Number</Label>
+                  <Input
+                    id="idNumber"
+                    name="idNumber"
+                    value={employee.idNumber}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="age" className="block text-sm font-medium">Age</Label>
+                  <Input
+                    id="age"
+                    name="age"
+                    value={employee.age}
+                    onChange={handleChange}
+                    readOnly
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="gender" className="block text-sm font-medium">Gender</Label>
+                  <Input
+                    id="gender"
+                    name="gender"
+                    value={employee.gender}
+                    onChange={handleChange}
+                    readOnly
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="role" className="block text-sm font-medium">Role</Label>
+                  <Input
+                    id="role"
+                    name="role"
+                    value={employee.role}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="dateOfHire" className="block text-sm font-medium">Date of Hire</Label>
+                  <Input
+                    id="dateOfHire"
+                    name="dateOfHire"
+                    type="date"
+                    value={employee.dateOfHire}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="phoneNumber" className="block text-sm font-medium">Phone Number</Label>
+                  <Input
+                    id="phoneNumber"
+                    name="phoneNumber"
+                    value={employee.phoneNumber}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="email" className="block text-sm font-medium">Email</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    value={employee.email}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="address" className="block text-sm font-medium">Address</Label>
+                  <Input
+                    id="address"
+                    name="address"
+                    value={employee.address}
+                    onChange={handleChange}
+                    disabled={!editMode}
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </>
       ) : (
         <p>Employee not found</p>
@@ -419,11 +546,20 @@ export default function EmployeeDetailPage() {
 
       <Separator />
 
-      {/* Document Upload Section */}
-      <h3 className="text-xl font-bold mb-2">Documents</h3>
+      {/* Documents Section */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-xl font-bold">Documents</h3>
+        <div className="space-x-2">
+         
+          <Button onClick={openUploadDialog} size="sm">
+            <Plus className="h-4 w-4 mr-2" />
+            Upload Document
+          </Button>
+        </div>
+      </div>
 
-      {/* Documents List Section */}
-      {loadingDocuments ? (
+      {/* Documents List Section - Updated with dropdown menu */}
+      {loading ? (
         <div className="flex justify-center mt-4">
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
@@ -435,98 +571,111 @@ export default function EmployeeDetailPage() {
               <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
             </div>
           ) : (
-            documents.map((doc, index) => (
+            documents.map((doc) => (
               <Card key={doc.id} className="p-4">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm">
-                      {doc.fileName}  
-                    </p>
-                    <p className="text-xs text-muted-foreground">{doc.docType}</p>
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-primary/70" />
+                    <div>
+                      <p className="text-sm font-medium">
+                        {doc.fileName}
+                      </p>
+                      <div className="flex items-center text-xs text-muted-foreground space-x-2">
+                        <span>{doc.docType}</span>
+                        {doc.expiryDate && (
+                          <div className="flex items-center space-x-1">
+                            <span>•</span>
+                            <CalendarIcon className="h-3 w-3" />
+                            <span>Expires: {formatExpiryDate(doc.expiryDate)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-x-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleViewDocument(doc.url)}
-                    >
-                      View
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => {
-                        setDocToDelete({ id: doc.id, fileName: doc.fileName });
-                        setShowDeleteDialog(true);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
+                  
+                  {/* Replace buttons with dropdown menu */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleViewDocument(doc.url, doc.fileName)}>
+                        <Eye className="h-4 w-4 mr-2" />
+                        View
+                      </DropdownMenuItem>
+                      {/* <DropdownMenuItem onClick={() => handleDownloadDocument(doc.url, doc.fileName)}>
+                        <Download className="h-4 w-4 mr-2" />
+                        Download
+                      </DropdownMenuItem> */}
+                      <DropdownMenuItem onClick={() => handleEditDocument(doc)}>
+                        <Edit className="h-4 w-4 mr-2" />
+                        Replace
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => {
+                          setDocToDelete({ id: doc.id, fileName: doc.fileName });
+                          setShowDeleteDialog(true);
+                        }}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </Card>
             ))
           )}
+          <div className="flex mt-2 justify-end">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setDownloadDialogOpen(true)}
+            disabled={documents.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Download Documents
+          </Button>
+          </div>
         </div>
       )}
 
-      <Card className="p-4">
-        <h3 className="text-lg font-medium">Upload New Document</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="category-select" className="block mb-2 text-sm font-medium">
-              Document Category
-            </Label>
-            <Select value={docType} onValueChange={(value) => setDocType(value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {documentCategories.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            {selectedFile && (
-              <p className="mt-2 text-sm text-green-600">
-                File selected: {selectedFile.name}
-              </p>
-            )}
-          </div>
-        </div>
-        {/* Single Drop Zone */}
-        <div
-          {...getRootProps()}
-          className={`flex h-52 w-full items-center justify-center rounded border-2 border-dashed p-4 mt-4 ${
-            isDragActive ? "bg-gray-100" : ""
-          }`}
-        >
-          <input {...getInputProps()} />
-          {isDragActive ? (
-            <p>Drop the file here ...</p>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Drag &amp; drop a file here, or click to select one.
-            </p>
-          )}
-        </div>
-        <div className="flex justify-end mt-2">
-          <Button size="sm" onClick={handleUploadDocument} disabled={!selectedFile || !docType || loading}>
-            {uploadingDoc ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              "Upload Document"
-            )}
-          </Button>
-        </div>
-      </Card> 
+      {/* Upload Document Dialog */}
+      {merchantCode && (
+        <EmployeeUploadDialog
+          open={uploadDialogOpen}
+          onOpenChange={setUploadDialogOpen}
+          docType={docType}
+          setDocType={setDocType}
+          selectedFile={selectedFile}
+          setSelectedFile={setSelectedFile}
+          onConfirm={handleUploadDocument}
+          uploading={uploadingDoc}
+          merchantCode={merchantCode}
+          hasExpiry={hasExpiry}
+          setHasExpiry={setHasExpiry}
+        />
+      )}
+
+      {/* Add Edit Document Dialog */}
+      {merchantCode && (
+        <EditDocumentDialog
+          open={editDocDialogOpen}
+          onOpenChange={setEditDocDialogOpen}
+          document={documentToEdit}
+          docType={docType}
+          setDocType={setDocType}
+          selectedFile={selectedFile}
+          setSelectedFile={setSelectedFile}
+          onConfirm={handleUpdateDocument}
+          uploading={uploadingDoc}
+          hasExpiry={hasExpiry}
+          setHasExpiry={setHasExpiry}
+        />
+      )}
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
@@ -554,6 +703,36 @@ export default function EmployeeDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Expiry Date Dialog */}
+      {recentlyUploadedDoc && (
+        <EmployeeExpiryDialog
+          open={expiryDateDialogOpen}
+          onOpenChange={setExpiryDateDialogOpen}
+          documentUrl={recentlyUploadedDoc.url}
+          documentName={recentlyUploadedDoc.fileName}
+          onSave={handleSaveExpiryDate}
+          isLoading={savingExpiryDate}
+        />
+      )}
+
+      {/* Document Downloader Dialog */}
+      <EmployeeDocumentDownloader
+        isOpen={downloadDialogOpen}
+        onOpenChange={setDownloadDialogOpen}
+        documents={documents}
+        employeeName={employee ? `${employee.firstName} ${employee.lastName}` : "Employee"}
+      />
+
+      {/* Fullscreen Document Viewer */}
+      {viewingDocumentUrl && (
+        <FullscreenDocumentViewer
+          open={fullscreenViewerOpen}
+          onOpenChange={setFullscreenViewerOpen}
+          documentUrl={viewingDocumentUrl}
+          documentName="Employee Document"
+        />
+      )}
     </section>
   );
 }

@@ -21,6 +21,7 @@ import { Project } from "@/types/project";
 import { fetchProjects, fetchProjectsForMerchant } from "../../lib/fetch-projects";
 import { useAuth } from "@/context/auth-context";
 import { StatsGrid } from "../components/customs/stats-grid";
+import Component11 from "../components/customs/select";
 
 const DashboardPage: React.FC = () => {
   const { user } = useAuth();
@@ -150,6 +151,8 @@ const DashboardPage: React.FC = () => {
       <main>
         <div className="flex flex-col space-y-2 mb-4">
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+
+         
           <Breadcrumb>
             <BreadcrumbList>
               <BreadcrumbItem>

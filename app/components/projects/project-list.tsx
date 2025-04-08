@@ -83,7 +83,7 @@ export default function ProjectsListPage({
         setInternalLoading(false);
       }
     }
-  };
+  }
 
   if (loading) {
     return (
@@ -109,7 +109,7 @@ export default function ProjectsListPage({
               Refresh
             </Button>
             </div>
-        <ProjectsTable projects={projects} />
+        <ProjectsTable projects={projects} merchantCode={merchantCode} onRefresh={handleRefresh}/>
       </div>
     </div>
   );

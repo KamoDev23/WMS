@@ -2,8 +2,8 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import CreateProjectModal, { type NewProject } from "../components/project/components/create-project-modal"
-  import { Button } from "@/components/ui/button"
-import { setDoc, doc, getDoc } from "firebase/firestore"
+import { Button } from "@/components/ui/button"
+import { setDoc, doc, getDoc, updateDoc } from "firebase/firestore"
 import { db } from "@/firebase/firebase-config"
 import type { Project } from "@/types/project"
 import { useAuth } from "@/context/auth-context"
@@ -15,20 +15,23 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { HomeIcon, List, BarChart2, Grid, Plus } from "lucide-react"
+import { HomeIcon, List, BarChart2, Grid, Plus, InboxIcon } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ProjectsListPage from "../components/projects/project-list"
 import { GanttChart } from "../components/projects/charts/gantt"
 import { ProjectCardView } from "../components/projects/cards/project-card-view"
- 
+import ProjectBacklogSheet from "../components/project/backlog/project-backlog-sheet"
+import ProjectDocumentsTable from "../components/projects/tables/project-documents-table"
+  
 const ProjectsPage: React.FC = () => {
   const { user } = useAuth() // Get the logged-in user
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
-  const [merchantCode, setMerchantCode] = useState<string | null>(null)
+  const [backlogProjects, setBacklogProjects] = useState<Project[]>([])
+  const [merchantCode, setMerchantCode] = useState<string | undefined>(undefined)
   const [isLoading, setIsLoading] = useState(true)
-  const [activeView, setActiveView] = useState<"list" | "gantt" | "card">("list")
+  const [activeView, setActiveView] = useState<"list" | "listd" | "gantt" | "card">("list")
 
   // Fetch projects when component mounts or when user changes
   useEffect(() => {
@@ -57,6 +60,7 @@ const ProjectsPage: React.FC = () => {
         return
       }
       setMerchantCode(userData.merchantCode)
+      console.log("Fetched merchant code:", userData.merchantCode)
 
       // Fetch projects from the new directory structure
       const fetchedProjects = await fetchProjectsForMerchant(userData.merchantCode)
@@ -86,7 +90,12 @@ const ProjectsPage: React.FC = () => {
         return project
       })
 
-      setProjects(projectsWithDates)
+      // Separate active and backlog projects
+      const active = projectsWithDates.filter(p => !p.isBacklog);
+      const backlog = projectsWithDates.filter(p => p.isBacklog);
+      
+      setProjects(active)
+      setBacklogProjects(backlog)
     } catch (error) {
       console.error("Error fetching projects:", error)
     } finally {
@@ -110,7 +119,7 @@ const ProjectsPage: React.FC = () => {
       return
     }
 
-    const projectId = generateProjectId(newProject.registrationNumber, projects)
+    const projectId = generateProjectId(newProject.registrationNumber, [...projects, ...backlogProjects])
     const project: Project = {
       id: projectId,
       registrationNumber: newProject.registrationNumber,
@@ -120,6 +129,7 @@ const ProjectsPage: React.FC = () => {
       dateOpened: new Date().toISOString().split("T")[0],
       status: "Open",
       odometerReading: newProject.odometerReading,
+      isBacklog: false,
     }
 
     try {
@@ -132,6 +142,28 @@ const ProjectsPage: React.FC = () => {
       console.error("Error creating project:", error)
     }
   }
+
+  const handleMoveFromBacklog = async (projectId: string) => {
+    console.log("Moving project from backlog:", projectId)
+    console.log("Merchant code:", merchantCode)
+    if (!merchantCode) return;
+    
+    try {
+      const projectRef = doc(db, "merchants", merchantCode, "projects", projectId);
+      await updateDoc(projectRef, {
+        isBacklog: false
+      });
+      
+      // Update local state
+      const project = backlogProjects.find(p => p.id === projectId);
+      if (project) {
+        setBacklogProjects(prev => prev.filter(p => p.id !== projectId));
+        setProjects(prev => [...prev, {...project, isBacklog: false}]);
+      }
+    } catch (error) {
+      console.error("Error moving project from backlog:", error);
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -158,7 +190,12 @@ const ProjectsPage: React.FC = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold">Projects List</h2>
         <div className="flex gap-2">
-        
+          {/* Backlog button added here */}
+          <ProjectBacklogSheet 
+            backlogProjects={backlogProjects}
+            onMoveFromBacklog={handleMoveFromBacklog}
+          />
+          
           <Button onClick={() => setIsModalOpen(true)} className="flex items-center">
             <Plus className="h-4 w-4 mr-2" />
             Create Project
@@ -168,13 +205,17 @@ const ProjectsPage: React.FC = () => {
       <div className="mb-4">
       <Tabs
             value={activeView}
-            onValueChange={(value) => setActiveView(value as "list" | "gantt" | "card")}
+            onValueChange={(value) => setActiveView(value as "list" | "listd" | "gantt" | "card")}
             className="w-full sm:w-auto"
           >
-            <TabsList className="grid grid-cols-3 w-full sm:w-auto">
+            <TabsList className="grid grid-cols-4 w-full sm:w-auto">
               <TabsTrigger value="list" className="flex items-center">
                 <List className="h-4 w-4 mr-2" />
                 List
+              </TabsTrigger>
+              <TabsTrigger value="listd" className="flex items-center">
+                <List className="h-4 w-4 mr-2" />
+                List (docs)
               </TabsTrigger>
               <TabsTrigger value="card" className="flex items-center">
                 <Grid className="h-4 w-4 mr-2" />
@@ -192,6 +233,13 @@ const ProjectsPage: React.FC = () => {
         <ProjectsListPage
           projects={projects}
           isLoading={isLoading}
+          onRefresh={fetchMerchantProjects}
+          merchantCode={merchantCode}
+        />
+      )}
+       {activeView === "listd" && (
+        <ProjectDocumentsTable
+          projects={projects}
           onRefresh={fetchMerchantProjects}
           merchantCode={merchantCode}
         />
@@ -217,4 +265,3 @@ const ProjectsPage: React.FC = () => {
 }
 
 export default ProjectsPage
-

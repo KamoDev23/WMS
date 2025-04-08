@@ -26,11 +26,14 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Filter, X } from "lucide-react";
+import { ChevronDown, Filter, X, MoreHorizontal, Archive } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Project } from "@/types/project";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { doc, updateDoc } from "firebase/firestore";
+import { db } from "@/firebase/firebase-config";
+import { toast } from "sonner";
 
 // Define status badge variants and colors
 const getStatusBadgeProps = (status: string) => {
@@ -96,11 +99,18 @@ interface Filters {
 
 export interface ProjectsTableProps {
   projects: Project[];
+  merchantCode?: string | null;
+  onRefresh?: () => void;
 }
 
-export const ProjectsTable: React.FC<ProjectsTableProps> = ({ projects }) => {
+export const ProjectsTable: React.FC<ProjectsTableProps> = ({ 
+  projects, 
+  merchantCode,
+  onRefresh 
+}) => {
   const router = useRouter();
-  const data = projects ?? [];
+  // Filter out backlogged projects
+  const data = projects?.filter(project => !project.isBacklog) ?? [];
   const [searchQuery, setSearchQuery] = useState("");
   // Initially sort by "dateOpened" descending.
   const [sortColumn, setSortColumn] = useState<keyof Project>("dateOpened");
@@ -118,7 +128,7 @@ export const ProjectsTable: React.FC<ProjectsTableProps> = ({ projects }) => {
   });
 
   // State for managing column visibility.
-  const [visibleColumns, setVisibleColumns] = useState<Record<keyof Project, boolean>>({
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     id: true,
     registrationNumber: true,
     vehicleType: true,
@@ -128,7 +138,31 @@ export const ProjectsTable: React.FC<ProjectsTableProps> = ({ projects }) => {
     status: true,
     odometerReading: true,
     dateClosed: true,
+    actions: true, // Added actions column
   });
+
+  // Handler for moving project to backlog
+  const handleMoveToBacklog = async (e: React.MouseEvent, project: Project) => {
+    e.stopPropagation(); // Prevent row click event
+    
+    if (!merchantCode) {
+      toast.error("Merchant code not available, cannot update project");
+      return;
+    }
+    
+    try {
+      const projectRef = doc(db, "merchants", merchantCode, "projects", project.id);
+      await updateDoc(projectRef, {
+        isBacklog: true
+      });
+      
+      toast.success(`Project ${project.registrationNumber} moved to backlog`);
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error("Error moving project to backlog:", error);
+      toast.error("Failed to move project to backlog");
+    }
+  };
 
   // Extract unique values for each filter
   const filterOptions = useMemo(() => {
@@ -210,7 +244,7 @@ export const ProjectsTable: React.FC<ProjectsTableProps> = ({ projects }) => {
     router.push(`/projects/${id}`);
   };
 
-  const toggleColumnVisibility = (column: keyof Project) => {
+  const toggleColumnVisibility = (column: string) => {
     setVisibleColumns((prev) => ({ ...prev, [column]: !prev[column] }));
   };
 
@@ -464,11 +498,11 @@ export const ProjectsTable: React.FC<ProjectsTableProps> = ({ projects }) => {
             {Object.keys(visibleColumns).map((col) => (
               <DropdownMenuCheckboxItem
                 key={col}
-                checked={visibleColumns[col as keyof Project]}
-                onCheckedChange={() => toggleColumnVisibility(col as keyof Project)}
+                checked={visibleColumns[col]}
+                onCheckedChange={() => toggleColumnVisibility(col)}
                 className="capitalize"
               >
-                {col}
+                {col === 'actions' ? 'Actions' : col}
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>
@@ -542,6 +576,12 @@ export const ProjectsTable: React.FC<ProjectsTableProps> = ({ projects }) => {
                   Date {sortColumn === "dateOpened" ? (sortOrder === "asc" ? "▲" : "▼") : ""}
                 </TableHead>
               )}
+              {/* New Actions column */}
+              {visibleColumns.actions && (
+                <TableHead className="w-[80px] text-right">
+                  Actions
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -549,27 +589,71 @@ export const ProjectsTable: React.FC<ProjectsTableProps> = ({ projects }) => {
               paginatedProjects.map((project) => (
                 <TableRow
                   key={project.id}
-                  onClick={() => handleRowClick(project.id)}
                   className="cursor-pointer hover:bg-muted"
                 >
-                  {visibleColumns.id && <TableCell>{project.id}</TableCell>}
-                  {visibleColumns.registrationNumber && <TableCell>{project.registrationNumber}</TableCell>}
+                  {visibleColumns.id && (
+                    <TableCell onClick={() => handleRowClick(project.id)}>
+                      {project.id}
+                    </TableCell>
+                  )}
+                  {visibleColumns.registrationNumber && (
+                    <TableCell onClick={() => handleRowClick(project.id)}>
+                      {project.registrationNumber}
+                    </TableCell>
+                  )}
                   {visibleColumns.status && (
-                    <TableCell>
+                    <TableCell onClick={() => handleRowClick(project.id)}>
                       <StatusBadge status={project.status} />
                     </TableCell>
                   )}
-                  {visibleColumns.vehicleType && <TableCell>{project.vehicleType}</TableCell>}
-                  {visibleColumns.typeOfWork && <TableCell>{project.typeOfWork}</TableCell>}
-                  {visibleColumns.location && <TableCell>{project.location}</TableCell>}
-                  {visibleColumns.dateOpened && <TableCell>{project.dateOpened}</TableCell>}
+                  {visibleColumns.vehicleType && (
+                    <TableCell onClick={() => handleRowClick(project.id)}>
+                      {project.vehicleType}
+                    </TableCell>
+                  )}
+                  {visibleColumns.typeOfWork && (
+                    <TableCell onClick={() => handleRowClick(project.id)}>
+                      {project.typeOfWork}
+                    </TableCell>
+                  )}
+                  {visibleColumns.location && (
+                    <TableCell onClick={() => handleRowClick(project.id)}>
+                      {project.location}
+                    </TableCell>
+                  )}
+                  {visibleColumns.dateOpened && (
+                    <TableCell onClick={() => handleRowClick(project.id)}>
+                      {project.dateOpened}
+                    </TableCell>
+                  )}
+                  {/* 3-dot menu for actions */}
+                  {visibleColumns.actions && (
+                    <TableCell className="text-right p-0 pr-2">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">Open menu</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={(e) => handleMoveToBacklog(e, project)}>
+                            <Archive className="h-4 w-4 mr-2" />
+                            Move to Backlog
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
                   colSpan={
-                    Object.keys(visibleColumns).filter((col) => visibleColumns[col as keyof Project]).length
+                    Object.keys(visibleColumns).filter((col) => visibleColumns[col]).length
                   }
                   className="text-center h-24"
                 >

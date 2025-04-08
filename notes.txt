@@ -11,8 +11,8 @@ WMS
 	- Update uploaded Repair quote
 		- "Update" button 
 		- Prompt the user to upload new doc
-		- Prompt to add new amount
-	- Keep old quote
+		- Prompt to add new amount 
+	- Keep old quote ✔
 	- Recalculate using new quote  ✔
 
 
@@ -51,50 +51,57 @@ WMS
 
 - INVOICE UPLOAD ERROR ✔
 
-- employee age from id number
+- employee age from id number ✔
 
-= accounting docs increment
+= accounting docs increment ✔
 
 - Document upload types ✔
 
 - Script to read pre-auth
 
-- Delete confirmation & loading animation ( Profile page & Accounting page )
+- Delete confirmation & loading animation ( Profile page & Accounting page ) ✔
 
-- Saving user details
+- Saving user details ✔
+
+- Repaired/tyres fitted checkbox ✔
+
+- ProjectID in documents field to match incremental projects
 
 - Delete project
 
 - Create project (Project ID mismatch in project view)
 
-- Project history table sort by date
+- Project history table sort by date 
 
 - Forgot password page
 
-- Card view badge text size increase
+- Card view badge text size increase 
 
-- Update doc not showing new file
+- Update doc not showing new file ✔
 
-- Upload file pop-up
+- Upload file pop-up ✔
 
-- Automatically update ID
+- Automatically update ID 
 
-- Add new user logs 
+- Add new user logs in - logout 
 
-- Label for contingent doc
+- Label for contingent doc ✔
 
-- Income - Amount & label on upload
+- Income - Amount & label on upload ✔
 
-- Fuel & maintenance 
+- Fuel & maintenance  ✔
 	- Prompt type (Fule, maintenance or repair)
 	- If fuel label as fuel
 	- If maintenance Prompt label
 	- Repair prompt label 
 	= + amounts
 
-- Employee name & amount for payslip
+- Employee name & amount for payslip ✔
 
-- Tax & BEE doc expire so track date (prompt user to input date)
+- Tax & BEE doc expire so track date (prompt user to input date) ✔
 
 - Asset management (PLUS)
 
+- Invoicing and quotes on app
+
+- AI

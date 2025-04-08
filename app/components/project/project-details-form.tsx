@@ -34,7 +34,7 @@ import { useCustomToast } from "../customs/toast";
 import { toast } from "sonner";
 // Import Tabs components
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { HouseIcon, PanelsTopLeftIcon, BoxIcon, HomeIcon } from "lucide-react";
+import { HouseIcon, PanelsTopLeftIcon, BoxIcon, HomeIcon, Plus, Clipboard, Trash } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { db } from "@/firebase/firebase-config";
@@ -42,7 +42,8 @@ import { doc, updateDoc } from "firebase/firestore";
 import { collection, getDocs } from "firebase/firestore";
 import { useAuth } from "@/context/auth-context";
 import ProjectProgress from "./components/project-progress";
- 
+import QuoteCreatorPage from "./quotes2/quote-builder";
+  
 export interface ProjectDetail {
   id: string;
   typeOfWork: string;
@@ -56,6 +57,7 @@ export interface ProjectDetail {
   cancellationReason?: string;
   odometerReading: number;
   workCompleted?: boolean; // New field to track if repairs/tires have been completed
+  notes?: { id: string; content: string; createdAt: string; createdBy?: string }[]; // Added notes array
 }
 
 interface ProjectDetailFormProps {
@@ -158,6 +160,7 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
         status: project.status || "",
         workCompleted: project.workCompleted || false, // Save the workCompleted state
         odometerReading: project.odometerReading || 0,
+        notes: project.notes || [],
       });
       toast.success("Project updated successfully!");
       if (onSave) onSave(project);
@@ -343,6 +346,13 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
               <PanelsTopLeftIcon className="-ms-0.5 me-1.5 opacity-60" size={16} aria-hidden="true" />
               Documents
             </TabsTrigger>
+            {/* <TabsTrigger
+              value="quotes"
+              className="flex-1 text-center hover:bg-accent hover:text-foreground data-[state=active]:after:bg-primary data-[state=active]:hover:bg-accent relative after:absolute after:inset-x-0 after:bottom-0 after:-mb-1 after:h-0.5 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <BoxIcon className="-ms-0.5 me-1.5 opacity-60" size={16} aria-hidden="true" />
+              Quotation & Invoicing
+            </TabsTrigger> */}
             <TabsTrigger
               value="accounting"
               className="flex-1 text-center hover:bg-accent hover:text-foreground data-[state=active]:after:bg-primary data-[state=active]:hover:bg-accent relative after:absolute after:inset-x-0 after:bottom-0 after:-mb-1 after:h-0.5 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
@@ -350,6 +360,7 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
               <BoxIcon className="-ms-0.5 me-1.5 opacity-60" size={16} aria-hidden="true" />
               Accounting
             </TabsTrigger>
+            
           </TabsList>
 
           <TabsContent value="overview">
@@ -363,39 +374,51 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
                         <span>Project Information</span> 
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="id" className="block text-sm font-medium">
-                        Project ID
-                      </Label>
-                      <Input id="id" name="id" value={project.id} readOnly className="mt-1" />
-                    </div>
-                    <div>
-                      <LabelWithAsterisk htmlFor="partners" label="Partners" value={project.partners} />
-                      <Input
-                        id="partners"
-                        name="partners"
-                        value={project.partners}
-                        onChange={handleChange}
-                        placeholder="Enter partners separated by commas"
-                        className="mt-1"
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <LabelWithAsterisk htmlFor="typeOfWork" label="Type of work" value={project.typeOfWork} />
-                      <Input
-                        id="typeOfWork"
-                        name="typeOfWork"
-                        value={project.typeOfWork}
-                        onChange={handleChange}
-                        placeholder="Enter type of work"
-                        className="mt-1"
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
+                      <CardContent>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor="id" className="block text-sm font-medium">
+                              Project ID
+                            </Label>
+                            <Input id="id" name="id" value={project.id} readOnly className="mt-1" />
+                          </div>
+                          <div>
+                            <LabelWithAsterisk htmlFor="partners" label="Partners" value={project.partners} />
+                            <Input
+                              id="partners"
+                              name="partners"
+                              value={project.partners}
+                              onChange={handleChange}
+                              placeholder="Enter partners separated by commas"
+                              className="mt-1"
+                              disabled={!isEditing}
+                            />
+                          </div>
+                          <div>
+                            <LabelWithAsterisk htmlFor="typeOfWork" label="Type of work" value={project.typeOfWork} />
+                            <Input
+                              id="typeOfWork"
+                              name="typeOfWork"
+                              value={project.typeOfWork}
+                              onChange={handleChange}
+                              placeholder="Enter type of work"
+                              className="mt-1"
+                              disabled={!isEditing}
+                            />
+                          </div>
+                          <div>
+                            <LabelWithAsterisk htmlFor="location" label="Location" value={project.location} />
+                            <Input
+                              id="location"
+                              name="location"
+                              value={project.location}
+                              onChange={handleChange}
+                              placeholder="Enter location"
+                              className="mt-1"
+                              disabled={!isEditing}
+                            />
+                          </div>
+                        <div>
                     
                     </div>
                     <div>
@@ -427,98 +450,199 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
                         />
                       </div>
                     )}
-                  </div>
-
-                  <Separator className="mt-6 mb-4" />
-
-                {/* Vehicle Details Section */}
-                <div className="mb-6">
-                  <h2 className="text-md font-bold mb-4">Vehicle Details</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <LabelWithAsterisk
-                        htmlFor="registrationNumber"
-                        label="Registration Number"
-                        value={project.registrationNumber}
-                      />
-                      <Input
-                        id="registrationNumber"
-                        name="registrationNumber"
-                        value={project.registrationNumber}
-                        onChange={handleChange}
-                        className="mt-1"
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <LabelWithAsterisk htmlFor="vehicleType" label="Vehicle Type" value={project.vehicleType} />
-                      <Input
-                        id="vehicleType"
-                        name="vehicleType"
-                        value={project.vehicleType}
-                        onChange={handleChange}
-                        className="mt-1"
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <LabelWithAsterisk htmlFor="location" label="Location" value={project.location} />
-                      <Input
-                        id="location"
-                        name="location"
-                        value={project.location}
-                        onChange={handleChange}
-                        className="mt-1"
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <LabelWithAsterisk htmlFor="fleetNumber" label="Fleet Number" value={project.fleetNumber} />
-                      <Input
-                        id="fleetNumber"
-                        name="fleetNumber"
-                        value={project.fleetNumber}
-                        onChange={handleChange}
-                        className="mt-1"
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    <div>
-                      <LabelWithAsterisk htmlFor="odometerReading" label="Odometer reading" value={project.odometerReading.toString()} />
-                      <Input
-                        id="odometerReading"
-                        name="odometerReading"
-                        value={project.odometerReading.toString()}
-                        type="number"
-                        onChange={handleChange}
-                        className="mt-1"
-                        disabled={!isEditing}
-                      />
-                    </div>
-                    
-                    {/* Conditional Work Completion Checkbox */}
-                    {isRepairOrTyreWork() && (
-                      <div className="col-span-2">
-                        <div className="flex items-center space-x-2 mt-4">
-                          <Checkbox 
-                            id="workCompleted" 
-                            checked={project.workCompleted || false}
-                            onCheckedChange={(checked) => {
-                              setProject(prev => ({ ...prev, workCompleted: checked === true }));
-                            }}
-                            disabled={!isEditing}
-                          />
-                          <Label 
-                            htmlFor="workCompleted" 
-                            className="text-sm font-medium cursor-pointer"
-                          >
-                            {getWorkCompletedLabel()}
-                          </Label>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+
+                        <Separator className="mt-6 mb-4" />
+
+                        {/* Vehicle Details Section */}
+                        <div className="mb-6">
+                          <h2 className="text-md font-bold mb-4">Vehicle Details</h2>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <LabelWithAsterisk
+                                htmlFor="registrationNumber"
+                                label="Registration Number"
+                                value={project.registrationNumber}
+                              />
+                              <Input
+                                id="registrationNumber"
+                                name="registrationNumber"
+                                value={project.registrationNumber}
+                                onChange={handleChange}
+                                className="mt-1"
+                                disabled={!isEditing}
+                              />
+                            </div>
+                            <div>
+                              <LabelWithAsterisk htmlFor="vehicleType" label="Vehicle Type" value={project.vehicleType} />
+                              <Input
+                                id="vehicleType"
+                                name="vehicleType"
+                                value={project.vehicleType}
+                                onChange={handleChange}
+                                className="mt-1"
+                                disabled={!isEditing}
+                              />
+                            </div>
+                            <div>
+                              <LabelWithAsterisk htmlFor="location" label="Location" value={project.location} />
+                              <Input
+                                id="location"
+                                name="location"
+                                value={project.location}
+                                onChange={handleChange}
+                                className="mt-1"
+                                disabled={!isEditing}
+                              />
+                            </div>
+                            <div>
+                              <LabelWithAsterisk htmlFor="fleetNumber" label="Fleet Number" value={project.fleetNumber} />
+                              <Input
+                                id="fleetNumber"
+                                name="fleetNumber"
+                                value={project.fleetNumber}
+                                onChange={handleChange}
+                                className="mt-1"
+                                disabled={!isEditing}
+                              />
+                            </div>
+                            <div>
+                              <LabelWithAsterisk htmlFor="odometerReading" label="Odometer reading" value={project.odometerReading.toString()} />
+                              <Input
+                                id="odometerReading"
+                                name="odometerReading"
+                                value={project.odometerReading.toString()}
+                                type="number"
+                                onChange={handleChange}
+                                className="mt-1"
+                                disabled={!isEditing}
+                              />
+                            </div>
+                            
+                            {/* Conditional Work Completion Checkbox */}
+                            {isRepairOrTyreWork() && (
+                              <div className="col-span-2">
+                                <div className="flex items-center space-x-2 mt-4">
+                                  <Checkbox 
+                                    id="workCompleted" 
+                                    checked={project.workCompleted || false}
+                                    onCheckedChange={(checked) => {
+                                      setProject(prev => ({ ...prev, workCompleted: checked === true }));
+                                    }}
+                                    disabled={!isEditing}
+                                  />
+                                  <Label 
+                                    htmlFor="workCompleted" 
+                                    className="text-sm font-medium cursor-pointer"
+                                  >
+                                    {getWorkCompletedLabel()}
+                                  </Label>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <Separator className="mt-6 mb-4" />
+
+                        {/* Notes Section */}
+
+                        <div className="mb-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-md font-bold">Project Notes</h2>
+                            {isEditing && (
+                              <Button 
+                                type="button" 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => {
+                                  // Add a new note with timestamp
+                                  const newNote = {
+                                    id: Date.now().toString(),
+                                    content: "",
+                                    createdAt: new Date().toISOString(),
+                                   };
+                                  setProject(prev => ({
+                                    ...prev,
+                                    notes: [...(prev.notes || []), newNote]
+                                  }));
+                                }}
+                                className="flex items-center gap-1"
+                              >
+                                <Plus />
+                                Add Note
+                              </Button>
+                            )}
+                          </div>
+
+                          {/* Notes List */}
+                          {(!project.notes || project.notes.length === 0) ? (
+                            <Card>
+                              <CardContent className="p-4">
+                              <div className="flex flex-col items-center justify-center ">
+                                <Clipboard />
+                                <p>No notes have been added to this project yet.</p>
+                                 
+                              </div></CardContent>
+                            </Card>
+                          ) : (
+                            <div className="space-y-4">
+                              {project.notes.map((note, index) => (
+                                <Card key={note.id || index} className="shadow-sm">
+                                  <CardContent className="p-4">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <div className="flex items-center text-sm "> 
+                                         <span className="mx-2">•</span>
+                                        <span>
+                                          {new Date(note.createdAt).toLocaleDateString()} at {new Date(note.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      </div>
+                                      {isEditing && (
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm"
+                                          className="h-8 w-8 p-0"
+                                          onClick={() => {
+                                            // Remove this note
+                                            setProject(prev => ({
+                                              ...prev,
+                                              notes: prev.notes?.filter((n, i) => n.id !== note.id) || []
+                                            }));
+                                          }}
+                                        >
+                                          <Trash />
+                                          <span className="sr-only">Delete</span>
+                                        </Button>
+                                      )}
+                                    </div>
+                                    
+                                    {isEditing ? (
+                                      <Textarea
+                                        value={note.content}
+                                        onChange={(e) => {
+                                          // Update the note content
+                                          setProject(prev => ({
+                                            ...prev,
+                                            notes: prev.notes?.map((n) => 
+                                              n.id === note.id ? { ...n, content: e.target.value } : n
+                                            ) || []
+                                          }));
+                                        }}
+                                        placeholder="Enter note details here..."
+                                        className="mt-1 w-full"
+                                        rows={3}
+                                      />
+                                    ) : (
+                                      <div className="whitespace-pre-wrap mt-2 ">
+                                        {note.content || <span className="italic ">No content</span>}
+                                      </div>
+                                    )}
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                     </CardContent>
                     </Card>
                    
@@ -537,6 +661,9 @@ export const ProjectDetailForm: React.FC<ProjectDetailFormProps> = ({
           <TabsContent value="documentation" className="flex-1 overflow-auto">
             <UploadDocumentsSection projectId={project.id} />
           </TabsContent>
+          {/* <TabsContent value="quotes" className="flex-1 overflow-auto">
+            <QuoteCreatorPage/>
+          </TabsContent> */}
           <TabsContent value="accounting" className="flex-1 overflow-auto">
             <AccountingSection projectId={project.id} />
           </TabsContent>

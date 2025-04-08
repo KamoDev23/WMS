@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { BicepsFlexed, ChevronRight } from "lucide-react";
+import { BicepsFlexed, ChevronRight, Pyramid } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/firebase/firebase-config";
 import { useAuth } from "@/context/auth-context";
@@ -39,10 +39,10 @@ export function TeamSwitcher() {
       <SidebarMenuItem>
         <SidebarMenuButton size="lg">
           <div className="flex aspect-square h-8 w-8 items-center justify-center rounded-lg bg-gray-200 text-gray-800">
-            <BicepsFlexed size={16} />
+            <Pyramid size={16} />
           </div>
-          <div className="grid flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-semibold">{companyName}</span>
+          <div className="grid flex-1 text-left text-lg leading-tight">
+            <span className="truncate font-semibold">Smart Line</span>
           </div>
         </SidebarMenuButton>
       </SidebarMenuItem>

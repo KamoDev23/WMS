@@ -1,6 +1,6 @@
 "use client";
-import { PlusIcon, DollarSign, ShieldCheckIcon, CheckCircle, FileText, BellIcon, LifeBuoyIcon, Loader2 } from "lucide-react";
-import React, { useState, useEffect, useCallback } from "react";
+import { PlusIcon, DollarSign, ShieldCheckIcon, CheckCircle, FileText, BellIcon, LifeBuoyIcon, Loader2, CalendarIcon, MoreVertical, Eye, Trash, Edit2, Download } from "lucide-react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,13 +10,6 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from "@/components/ui/accordion";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { DatePickerWithRange } from "@/app/components/customs/date-picker-with-range";
 import {
   collection,
@@ -26,12 +19,11 @@ import {
   doc,
   getDoc,
   deleteDoc,
+  Timestamp,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/firebase/firebase-config";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-// Import dialog components (adjust if needed)
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -41,17 +33,21 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { useDropzone } from "react-dropzone";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/context/auth-context";
 import { Separator } from "@/components/ui/separator";
-
-export type AccountingCategory =
-  | "Recurring Expenditure"
-  | "Contingent Expenses"
-  | "Compensation"
-  | "Bank Statements"
-  | "Income (Remittances)"
-  | "Fuel & Maintenance";
+import AccountingUploadDialog, { AccountingCategory } from "@/app/components/business/accounting/accounting-document-selector-command";
+import TransactionDetailsDialog from "@/app/components/business/accounting/transaction-details-dialog";
+import DocumentEditDialog from "@/app/components/business/accounting/document-edit-dialog";
+import { format } from "date-fns";
+import FullscreenDocumentViewer from "@/app/components/business/components/fullscreen-document-viewer";
+import DocumentDownloader from "@/app/components/business/accounting/document-downloader-dialog";
+import { toast } from "sonner";
 
 export interface AccountingDocument {
   id: string;
@@ -60,10 +56,12 @@ export interface AccountingDocument {
   url: string;
   uploadedAt: Date;
   amount?: number;
+  transactionDate?: Date;
   docType?: string;
+  label?: string;
 }
 
-const categoryOptions: AccountingCategory[] = [
+const MAIN_CATEGORIES = [
   "Recurring Expenditure",
   "Contingent Expenses",
   "Compensation",
@@ -75,28 +73,35 @@ const categoryOptions: AccountingCategory[] = [
 export default function AccountingPage() {
   const { user } = useAuth(); 
   const [merchantCode, setMerchantCode] = useState<string | null>(null);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const [viewingDocument, setViewingDocument] = useState<AccountingDocument | null>(null);
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  
   
   // Date range state
-  const [dateRange, setDateRange] = useState<
-    { from: Date; to: Date } | undefined
-  >(undefined);
+  const [dateRange, setDateRange] = useState<{ from: Date; to: Date } | undefined>(undefined);
   const [documents, setDocuments] = useState<AccountingDocument[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
 
-  // Centralized upload state
+  // Upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<
-    AccountingCategory | ""
-  >("");
-
-  // New state for dialog
-  const [showAmountDialog, setShowAmountDialog] = useState<boolean>(false);
-  const [currentDoc, setCurrentDoc] = useState<AccountingDocument | null>(null);
-  const [invoiceAmount, setInvoiceAmount] = useState<string>("");
-
-  const [accountingCategoriesMapping, setAccountingCategoriesMapping] = useState<Record<string, string[]>>({});
   const [selectedMainCategory, setSelectedMainCategory] = useState<string>("");
-  const [selectedSubCategory, setSelectedSubCategory] = useState<string>("");
+  const [documentLabel, setDocumentLabel] = useState<string>("");
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+
+  // Transaction details state
+  const [showTransactionDialog, setShowTransactionDialog] = useState<boolean>(false);
+  const [savingTransaction, setSavingTransaction] = useState<boolean>(false);
+  const [recentlyUploadedDoc, setRecentlyUploadedDoc] = useState<AccountingDocument | null>(null);
+
+  // Document edit state
+  const [showEditDialog, setShowEditDialog] = useState<boolean>(false);
+  const [savingEdit, setSavingEdit] = useState<boolean>(false);
+  const [documentToEdit, setDocumentToEdit] = useState<AccountingDocument | null>(null);
+
+  // Delete confirmation state
+  const [showDeleteDialog, setShowDeleteDialog] = useState<boolean>(false);
+  const [documentToDelete, setDocumentToDelete] = useState<AccountingDocument | null>(null);
 
   const categoryIcons: Record<string, React.ComponentType<{ size?: number }>> = {
     "Recurring Expenditure": DollarSign,
@@ -106,50 +111,6 @@ export default function AccountingPage() {
     "Income (Remittances)": BellIcon,
     "Fuel & Maintenance": LifeBuoyIcon,
   };
-
-
-    // Drag and drop functionality using react-dropzone
-    const onDrop = useCallback((acceptedFiles: File[]) => {
-      if (acceptedFiles.length > 0) {
-        setSelectedFile(acceptedFiles[0]);
-      }
-    }, []);
-  
-    const { getRootProps, getInputProps, isDragActive } = useDropzone({
-      onDrop,
-      multiple: false,
-    });
-
-    // Fetch the accounting categories mapping from Firestore when merchantCode is available
-    useEffect(() => {
-      if (!merchantCode) return;
-      const fetchAccountingCategoriesMapping = async () => {
-        try {
-          const merchantDocRef = doc(db, "merchants", merchantCode);
-          const merchantSnap = await getDoc(merchantDocRef);
-          if (merchantSnap.exists()) {
-            const data = merchantSnap.data();
-            // Expecting the mapping to be stored as an object: { [mainCategory: string]: string[] }
-            const mapping: Record<string, string[]> = data.
-            accountingDocumentOptions  || {};
-            setAccountingCategoriesMapping(mapping);
-            const mainCats = Object.keys(mapping);
-            if (mainCats.length > 0) {
-              setSelectedMainCategory(mainCats[0]);
-              if (mapping[mainCats[0]] && mapping[mainCats[0]].length > 0) {
-                setSelectedSubCategory(mapping[mainCats[0]][0]);
-              }
-            }
-          } else {
-            setAccountingCategoriesMapping({});
-          }
-        } catch (error) {
-          console.error("Error fetching accounting categories mapping:", error);
-          setAccountingCategoriesMapping({});
-        }
-      };
-      fetchAccountingCategoriesMapping();
-    }, [merchantCode]);
 
   // Fetch documents from Firestore, filtered by dateRange if provided.
   const fetchDocuments = async (code?: string) => {
@@ -164,12 +125,22 @@ export default function AccountingPage() {
       const docs: AccountingDocument[] = [];
       querySnapshot.forEach((docSnap) => {
         const data = docSnap.data() as Omit<AccountingDocument, "id">;
-        const uploadedAt =
-          data.uploadedAt && (data.uploadedAt as any).toDate
-            ? (data.uploadedAt as any).toDate()
-            : new Date(data.uploadedAt);
+        
+        // Handle dates
+        const uploadedAt = data.uploadedAt && (data.uploadedAt as any).toDate 
+          ? (data.uploadedAt as any).toDate() 
+          : new Date(data.uploadedAt);
+          
+        const transactionDate = data.transactionDate && (data.transactionDate as any).toDate
+          ? (data.transactionDate as any).toDate()
+          : data.transactionDate ? new Date(data.transactionDate) : undefined;
   
-        docs.push({ id: docSnap.id, ...data, uploadedAt });
+        docs.push({ 
+          id: docSnap.id, 
+          ...data, 
+          uploadedAt,
+          transactionDate
+        });
       });
   
       setDocuments(docs);
@@ -177,7 +148,6 @@ export default function AccountingPage() {
       console.error("Error fetching accounting documents:", error);
     }
   };
-  
   
   const fetchMerchantCode = async (userId: string): Promise<string | null> => {
     try {
@@ -210,362 +180,520 @@ export default function AccountingPage() {
     loadMerchantCode();
   }, [user]);
   
-
   useEffect(() => {
     fetchDocuments();
-  }, [dateRange?.from, dateRange?.to]);
+  }, [user, merchantCode]);
+
+  // Function to filter documents by transaction date range
+  const filterDocumentsByDateRange = (documents: AccountingDocument[]) => {
+    if (!dateRange || !dateRange.from || !dateRange.to) {
+      return documents;
+    }
+
+    return documents.filter(doc => {
+      // Skip documents without a transaction date
+      if (!doc.transactionDate) return false;
+      
+      // Convert all dates to midnight for proper comparison
+      const docDate = new Date(doc.transactionDate);
+      docDate.setHours(0, 0, 0, 0);
+      
+      const fromDate = new Date(dateRange.from);
+      fromDate.setHours(0, 0, 0, 0);
+      
+      const toDate = new Date(dateRange.to);
+      toDate.setHours(23, 59, 59, 999); // End of day
+      
+      // Check if document's transaction date is within the range
+      return docDate >= fromDate && docDate <= toDate;
+    });
+  };
 
   // Handle file upload
   const handleUpload = async () => {
-    if (!selectedFile || !merchantCode || !selectedMainCategory || !selectedSubCategory) {
-      console.error("Missing required fields: Merchant Code, File, Main Category, or Subcategory.");
+    if (!selectedFile || !merchantCode || !selectedMainCategory || !documentLabel.trim()) {
+      console.error("Missing required fields: Merchant Code, File, Main Category, or Document Label.");
       return;
     }
     setLoading(true);
     try {
       const timestamp = Date.now();
-      const ext = selectedFile.name.substring(selectedFile.name.lastIndexOf("."));
-      const count =
-        documents.filter((doc) => doc.category === selectedMainCategory).length + 1;
-      const newFileName = `${selectedMainCategory} (${selectedSubCategory})${ext}`;
-      // Combine the two selections to form the final document type.
-      const finalDocType = `${selectedMainCategory} - ${selectedSubCategory}`;
+      const originalExt = selectedFile.name.substring(selectedFile.name.lastIndexOf("."));
+      
+      // Create the custom filename with the format: "[MainCategory]: [UserLabel].extension"
+      const newFileName = `${selectedMainCategory}: ${documentLabel}${originalExt}`;
       
       // Upload file to Storage under a merchant-specific folder.
       const storageRef = ref(
         storage,
-        `merchants/${merchantCode}/documets/${selectedMainCategory}/${newFileName}`
+        `merchants/${merchantCode}/accounting/${selectedMainCategory}/${newFileName}`
       );
       const snapshot = await uploadBytes(storageRef, selectedFile);
       const url = await getDownloadURL(snapshot.ref);
     
       const docData = {
-        category: selectedMainCategory,
+        category: selectedMainCategory as AccountingCategory,
         fileName: newFileName,
         url,
         uploadedAt: new Date(),
+        label: documentLabel,
       };
     
       // Save document data to Firestore under merchant-specific path.
       const docRef = await addDoc(
         collection(db, "merchants", merchantCode, "accountingDocuments"),
-        { ...docData, docType: finalDocType }
+        docData
       );
     
       const newDoc: AccountingDocument = {
         id: docRef.id,
         ...docData,
-        docType: finalDocType,
         category: selectedMainCategory as AccountingCategory,
         uploadedAt: new Date(),
       };
     
       setDocuments((prev) => [...prev, newDoc]);
+      
+      // Store the uploaded document and show transaction dialog
+      setRecentlyUploadedDoc(newDoc);
+      
+      // Close the upload dialog
+      setUploadDialogOpen(false);
+      
+      // Reset upload form
+      setSelectedFile(null);
+      setSelectedMainCategory("");
+      setDocumentLabel("");
+      toast.success("Document uploaded successfully");
+      
+      // Open transaction details dialog
+      setShowTransactionDialog(true);
     } catch (error) {
       console.error("Error uploading document:", error);
+      toast.error("Error uploading document");
     } finally {
       setLoading(false);
-      setSelectedFile(null);
-      // Optionally, clear file input element if needed
     }
   };
-  
-  
 
-
-  // Handle confirming the invoice amount
-  const handleConfirmAmount = async () => {
-    if (!currentDoc || !merchantCode) return;
-  
+  // Handle saving transaction details
+  const handleSaveTransactionDetails = async (transactionDate: Date, amount: number) => {
+    if (!recentlyUploadedDoc || !merchantCode) return;
+    
+    setSavingTransaction(true);
     try {
-      const amountValue = parseFloat(invoiceAmount);
       const docRef = doc(
         db,
         "merchants",
         merchantCode,
         "accountingDocuments",
-        currentDoc.id
+        recentlyUploadedDoc.id
       );
   
-      await updateDoc(docRef, { amount: amountValue });
+      await updateDoc(docRef, {
+        amount: amount,
+        transactionDate: Timestamp.fromDate(transactionDate)
+      });
   
+      // Update local state
       setDocuments((prev) =>
         prev.map((d) =>
-          d.id === currentDoc.id ? { ...d, amount: amountValue } : d
+          d.id === recentlyUploadedDoc.id 
+            ? { ...d, amount: amount, transactionDate: transactionDate }
+            : d
         )
       );
   
-      setShowAmountDialog(false);
-      setCurrentDoc(null);
-      setInvoiceAmount("");
-      setSelectedFile(null);
-      setSelectedCategory("");
-  
-      const fileInput = document.getElementById("file-upload") as HTMLInputElement;
-      if (fileInput) fileInput.value = "";
+      // Close dialog and reset state
+      setShowTransactionDialog(false);
+      setRecentlyUploadedDoc(null);
+    
+      toast.success("Transaction details saved successfully");
     } catch (error) {
-      console.error("Error updating document with amount:", error);
+      console.error("Error saving transaction details:", error);
+      toast.error("Error saving transaction details");
+    } finally {
+      setSavingTransaction(false);
     }
   };
 
-  const handleDeleteDocument = async (docId: string, fileName: string) => {
-    if (!merchantCode) return;
-  
+  // Handle document edit
+  const handleEditDocument = (document: AccountingDocument) => {
+    setDocumentToEdit(document);
+    setShowEditDialog(true);
+  };
+
+  // Handle saving document edits
+  const handleSaveEdit = async (updates: {
+    label?: string;
+    amount?: number | null;
+    transactionDate?: Date | null;
+    newFile?: File | null;
+  }) => {
+    if (!documentToEdit || !merchantCode) return;
+    
+    setSavingEdit(true);
+    try {
+      const docRef = doc(
+        db,
+        "merchants",
+        merchantCode,
+        "accountingDocuments",
+        documentToEdit.id
+      );
+      
+      const updateData: any = {};
+      
+      // Handle metadata updates
+      if (updates.label !== undefined) {
+        updateData.label = updates.label;
+      }
+      
+      if (updates.amount !== undefined) {
+        updateData.amount = updates.amount;
+      }
+      
+      if (updates.transactionDate !== undefined) {
+        updateData.transactionDate = updates.transactionDate 
+          ? Timestamp.fromDate(updates.transactionDate)
+          : null;
+      }
+      
+      // If there's a new file, upload it and update the URL
+      if (updates.newFile) {
+        const originalExt = updates.newFile.name.substring(updates.newFile.name.lastIndexOf("."));
+        const label = updates.label || documentToEdit.label || documentToEdit.fileName;
+        
+        // Create the custom filename
+        const newFileName = `${documentToEdit.category}: ${label}${originalExt}`;
+        
+        // Upload new file
+        const storageRef = ref(
+          storage,
+          `merchants/${merchantCode}/accounting/${documentToEdit.category}/${newFileName}`
+        );
+        
+        const snapshot = await uploadBytes(storageRef, updates.newFile);
+        const url = await getDownloadURL(snapshot.ref);
+        
+        // Delete old file if filename changed
+        if (newFileName !== documentToEdit.fileName) {
+          try {
+            const oldFileRef = ref(
+              storage,
+              `merchants/${merchantCode}/accounting/${documentToEdit.category}/${documentToEdit.fileName}`
+            );
+            await deleteObject(oldFileRef);
+          } catch (error) {
+            console.error("Error deleting old file:", error);
+          }
+        }
+        
+        // Update document data
+        updateData.url = url;
+        updateData.fileName = newFileName;
+      }
+      
+      // Update document in Firestore
+      await updateDoc(docRef, updateData);
+      
+      // Update local state
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === documentToEdit.id
+            ? { 
+                ...d, 
+                ...updateData,
+                // Convert Timestamp back to Date if present
+                transactionDate: updateData.transactionDate ? 
+                  updateData.transactionDate.toDate() : 
+                  d.transactionDate
+              }
+            : d
+        )
+      );
+      
+      // Close dialog and reset state
+      setShowEditDialog(false);
+      setDocumentToEdit(null);
+      toast.success("Document updated successfully");
+    } catch (error) {
+      console.error("Error updating document:", error);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // Handle document deletion
+  const handleDeleteDocument = async () => {
+    if (!documentToDelete || !merchantCode) return;
+    
     setLoading(true);
     try {
       // Delete from Firestore
-      await deleteDoc(doc(db, "merchants", merchantCode, "accountingDocuments", docId));
-  
+      await deleteDoc(doc(
+        db, 
+        "merchants", 
+        merchantCode, 
+        "accountingDocuments", 
+        documentToDelete.id
+      ));
+      
       // Delete from Storage
-      const storageRef = ref(storage, `merchants/${merchantCode}/accounting/${selectedCategory}/${fileName}`);
+      const storageRef = ref(
+        storage, 
+        `merchants/${merchantCode}/accounting/${documentToDelete.category}/${documentToDelete.fileName}`
+      );
       await deleteObject(storageRef);
-  
-      setDocuments((prev) => prev.filter((doc) => doc.id !== docId));
+      
+      // Update local state
+      setDocuments((prev) => prev.filter((doc) => doc.id !== documentToDelete.id));
+      
+      // Close dialog and reset state
+      setShowDeleteDialog(false);
+      setDocumentToDelete(null);
     } catch (error) {
       console.error("Error deleting document:", error);
     } finally {
       setLoading(false);
     }
   };
-  
-  
+
+  // Format date for display
+  const formatDate = (date?: Date) => {
+    if (!date) return "";
+    return format(date, "MMM d, yyyy");
+  };
 
   // Group documents by category
-  const groupedDocs = documents.reduce((acc, doc) => {
+  const filteredDocuments = filterDocumentsByDateRange(documents);
+
+  // Group documents by category
+  const groupedDocs = filteredDocuments.reduce((acc, doc) => {
     (acc[doc.category] = acc[doc.category] || []).push(doc);
     return acc;
   }, {} as Record<AccountingCategory, AccountingDocument[]>);
 
   return (
     <section className="space-y-6">
-       <div>
-        <h2 className="text-2xl font-bold">Accounting</h2>
-        <p className="text-muted-foreground">
-          Add, remove, or edit your employees' details.
-        </p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold">Accounting</h2>
+          <p className="text-muted-foreground">
+            Manage your company's accounting documents.
+          </p>
+        </div>
+        
       </div>
 
       <Separator />
+
       <Card>
-          <CardHeader>
-            <CardTitle>Company Documents</CardTitle> 
-          </CardHeader>
-          <CardContent>
-            {/* Date Range Picker */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-2">
-        <DatePickerWithRange value={dateRange} onSelect={setDateRange} />
-      </div>
+        <CardHeader>
+          <CardTitle className="flex justify-between">
+            <div>Company Documents</div>
+            <Button onClick={() => setUploadDialogOpen(true)} size="sm">
+              <PlusIcon className="h-4 w-4 mr-2" />
+              Upload Document
+            </Button>
+          </CardTitle> 
+        </CardHeader>
+        <CardContent>
+          {/* Date Range Picker */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-2">
+            <DatePickerWithRange value={dateRange} onSelect={setDateRange} />
+          </div>
 
-      {/* Accordion for documents */}
-      <div className="space-y-4">
-  {categoryOptions.map((category) => {
-    const docsForCategory = groupedDocs[category] || [];
-    const IconComponent = categoryIcons[category] || DollarSign;
-    return (
-      <Accordion key={category} type="single" collapsible className="w-full">
-        <AccordionItem value={category} className="py-2">
-          <AccordionTrigger className="focus-visible:border-ring focus-visible:ring-ring/50 flex flex-1 items-center justify-between rounded-md py-2 text-left text-[15px] leading-6 font-semibold transition-all outline-none focus-visible:ring-[3px]">
-            <span className="flex items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border">
-                <IconComponent size={16}  />
-              </span>
-              <span className="flex flex-col">
-                <span>{category}</span>
-                <span className="text-sm font-normal">
-                  {docsForCategory.length} documents
+          {/* Accordion for documents */}
+          <div className="space-y-4">
+            {MAIN_CATEGORIES.map((category) => {
+              const docsForCategory = groupedDocs[category as AccountingCategory] || [];
+              const IconComponent = categoryIcons[category] || DollarSign;
+              return (
+                <Accordion key={category} type="single" collapsible className="w-full">
+                  <AccordionItem value={category} className="py-2">
+                    <AccordionTrigger className="focus-visible:border-ring focus-visible:ring-ring/50 flex flex-1 items-center justify-between rounded-md py-2 text-left text-[15px] leading-6 font-semibold transition-all outline-none focus-visible:ring-[3px]">
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border">
+                          <IconComponent size={16}  />
+                        </span>
+                        <span className="flex flex-col">
+                          <span>{category}</span>
+                          <span className="text-sm font-normal">
+                            {docsForCategory.length} documents
+                          </span>
+                        </span>
+                      </span>
+                    </AccordionTrigger>
+                    <AccordionContent className="text-muted-foreground ml-3 pl-10 pb-2">
+                      {docsForCategory.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No documents uploaded for this section.
+                        </p>
+                      ) : (
+                        docsForCategory.map((doc) => (
+                          <Card key={doc.id} className="bg-sidebar px-4 py-2 mb-2">
+                            <div className="flex items-center justify-between">
+                              <div className="text-sm">
+                                <div className="font-medium">{doc.label || doc.fileName}</div>
+                                <div className="text-xs text-muted-foreground mt-1 flex items-center flex-wrap gap-2">
+                                  {doc.amount !== undefined && (
+                                    <span className="inline-flex items-center gap-1">
+                                      
+                                      R{doc.amount.toFixed(2)}
+                                    </span>
+                                  )}
+                                  {doc.transactionDate && (
+                                    <span className="inline-flex items-center gap-1">
+                                      <CalendarIcon className="h-3 w-3" />
+                                      {formatDate(doc.transactionDate)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              {/* Options Dropdown */}
+                              {/* Options Dropdown */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="sm">
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-[160px]">
+                                  <DropdownMenuItem onClick={() => {
+                                    setViewingDocument(doc);
+                                    setFullscreenOpen(true);
+                                  }}>
+                                    <Eye className="h-4 w-4 mr-2" />
+                                    View
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleEditDocument(doc)}>
+                                    <Edit2 className="h-4 w-4 mr-2" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    onClick={() => {
+                                      setDocumentToDelete(doc);
+                                      setShowDeleteDialog(true);
+                                    }}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </Card>
+                        ))
+                      )}
+                    </AccordionContent>
+                  </AccordionItem>
+                  <div></div>
+                </Accordion>
+              );
+            })}
+          </div>
+        </CardContent>
+        <CardFooter className="flex justify-end">
+        <Button 
+            variant="outline" 
+            onClick={() => setDownloadDialogOpen(true)} 
+            size="sm"
+            disabled={filteredDocuments.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Download Documents
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {/* Upload Dialog */}
+      <AccountingUploadDialog
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        selectedFile={selectedFile}
+        setSelectedFile={setSelectedFile}
+        selectedMainCategory={selectedMainCategory}
+        setSelectedMainCategory={setSelectedMainCategory}
+        documentLabel={documentLabel}
+        setDocumentLabel={setDocumentLabel}
+        onUpload={handleUpload}
+        loading={loading}
+      />
+
+      {/* Transaction Details Dialog */}
+      <TransactionDetailsDialog
+        open={showTransactionDialog}
+        onOpenChange={setShowTransactionDialog}
+        document={recentlyUploadedDoc}
+        onSave={handleSaveTransactionDetails}
+        loading={savingTransaction}
+      />
+
+      {/* Document Edit Dialog */}
+      <DocumentEditDialog
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
+        document={documentToEdit}
+        onSave={handleSaveEdit}
+        loading={savingEdit}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Delete</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this document? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {documentToDelete && (
+            <div className="py-4">
+              <p className="font-medium">{documentToDelete.label || documentToDelete.fileName}</p>
+              <p className="text-sm text-muted-foreground mt-1">{documentToDelete.category}</p>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteDocument}
+              disabled={loading}
+            >
+              {loading ? (
+                <span className="flex items-center">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
                 </span>
-              </span>
-            </span>
-            {/* <PlusIcon
-              size={16}
-              className="pointer-events-none shrink-0 opacity-60 transition-transform duration-200"
-              aria-hidden="true"
-            /> */}
-          </AccordionTrigger>
-          <AccordionContent className="text-muted-foreground ml-3 pl-10 pb-2">
-            {docsForCategory.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No documents uploaded for this section.
-              </p>
-            ) : (
-              docsForCategory.map((doc, index) => (
-                <Card key={doc.id} className="bg-sidebar p-4 mb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm">
-                      {doc.fileName}
-                      {doc.amount !== undefined && ` - ${doc.amount}`}
-                    </div>
-                    <div className="space-x-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => window.open(doc.url, "_blank")}
-                      >
-                        View
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => {
-                          handleDeleteDocument(doc.id, doc.fileName);
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))
-            )}
-          </AccordionContent>
-        </AccordionItem>
-        <div></div>
-      </Accordion>
-    );
-  })}
-      </div>
-          </CardContent>
-        </Card>
-         
-      
-      
+              ) : (
+                "Delete"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Upload Section */}
-      <Card className="p-4">
-  <h3 className="text-lg font-medium">Upload New Document</h3>
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-    {/* Main Category Select */}
-    <div>
-      <Label htmlFor="main-category-select" className="block mb-2 text-sm font-medium">
-        Main Category
-      </Label>
-      <Select
-        value={selectedMainCategory}
-        onValueChange={(value) => {
-          setSelectedMainCategory(value);
-          // When main category changes, update the subcategory if available
-          if (accountingCategoriesMapping[value] && accountingCategoriesMapping[value].length > 0) {
-            setSelectedSubCategory(accountingCategoriesMapping[value][0]);
-          } else {
-            setSelectedSubCategory("");
-          }
-        }}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Select a main category" />
-        </SelectTrigger>
-        <SelectContent>
-          {Object.keys(accountingCategoriesMapping).map((cat) => (
-            <SelectItem key={cat} value={cat}>
-              {cat}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-    {/* Subcategory Select */}
-    <div>
-      <Label htmlFor="sub-category-select" className="block mb-2 text-sm font-medium">
-        Subcategory
-      </Label>
-      <Select
-        value={selectedSubCategory}
-        onValueChange={(value) => setSelectedSubCategory(value)}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Select a subcategory" />
-        </SelectTrigger>
-        <SelectContent>
-          {selectedMainCategory &&
-            accountingCategoriesMapping[selectedMainCategory]?.map((subcat) => (
-              <SelectItem key={subcat} value={subcat}>
-                {subcat}
-              </SelectItem>
-            ))}
-        </SelectContent>
-      </Select>
-    </div>
-  </div>
-  {selectedFile && (
-    <p className="mt-2 text-sm text-green-600">
-      File selected: {selectedFile.name}
-    </p>
-  )}
-  {/* Single Drop Zone */}
-  <div
-    {...getRootProps()}
-    className={`flex h-52 w-full items-center justify-center rounded border-2 border-dashed p-4 mt-4 ${
-      isDragActive ? "bg-gray-100" : ""
-    }`}
-  >
-    <input {...getInputProps()} />
-    {isDragActive ? (
-      <p>Drop the file here ...</p>
-    ) : (
-      <p className="text-sm text-muted-foreground">
-        Drag &amp; drop a file here, or click to select one.
-      </p>
-    )}
-  </div>
-  <div className="flex justify-end mt-2">
-    <Button
-      onClick={handleUpload}
-      disabled={!selectedFile || !selectedMainCategory || !selectedSubCategory || loading}
-    >
-      {loading ? (
-        <>
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Uploading...
-        </>
-      ) : (
-        "Upload Document"
-      )}
-    </Button>
-  </div>
-</Card>
+      <DocumentDownloader
+        isOpen={downloadDialogOpen}
+        onOpenChange={setDownloadDialogOpen}
+        documents={filteredDocuments}
+        dateRange={dateRange}
+      />
 
-
-      {/* Dialog to prompt for invoice amount and show document */}
-      {showAmountDialog && currentDoc && (
-        <Dialog open={showAmountDialog} onOpenChange={setShowAmountDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add Invoice Amount</DialogTitle>
-              <DialogDescription>
-                Please review the document below and enter the invoice amount.
-              </DialogDescription>
-            </DialogHeader>
-            {/* Iframe to display the document */}
-            <div className="mb-4">
-              <iframe
-                src={currentDoc.url}
-                title="Uploaded Document"
-                className="w-full h-64 border"
-              />
-            </div>
-            <div className="space-y-4 py-4">
-              <Label
-                className="block text-sm font-medium"
-                htmlFor="invoice-amount"
-              >
-                Invoice Amount
-              </Label>
-              <Input
-                id="invoice-amount"
-                type="number"
-                placeholder="Enter amount"
-                value={invoiceAmount}
-                onChange={(e) => setInvoiceAmount(e.target.value)}
-              />
-            </div>
-            <DialogFooter>
-              <Button onClick={handleConfirmAmount}>Confirm</Button>
-              <DialogClose asChild>
-                <Button variant="outline">Cancel</Button>
-              </DialogClose>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+      {viewingDocument && (
+        <FullscreenDocumentViewer
+          open={fullscreenOpen}
+          onOpenChange={setFullscreenOpen}
+          documentUrl={viewingDocument.url}
+          documentName={viewingDocument.label || viewingDocument.fileName}
+        />
       )}
     </section>
   );

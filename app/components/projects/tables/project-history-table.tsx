@@ -109,23 +109,26 @@ export function ProjectHistoryTable({
   onRefresh,
   title = "Open Projects",
   showAllLink = true,
-  filterByStatus
+  filterByStatus = "Open" // Default to showing only Open projects
 }: ProjectHistoryTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
-  const [pagination, setPagination] = useState({
-    pageIndex: 0,
-    pageSize: 10,
-  });
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
 
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  // Filter projects by status if filterByStatus is provided
+  // Reset page index when filtered data changes
+  useEffect(() => {
+    setPageIndex(0);
+  }, [globalFilter, columnFilters, filterByStatus]);
+
+  // Filter projects by status (defaulting to "Open")
   const filteredProjects = filterByStatus 
     ? projects.filter(project => project.status === filterByStatus)
     : projects;
@@ -142,14 +145,31 @@ export function ProjectHistoryTable({
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
-    onPaginationChange: setPagination,
+    manualPagination: false,
     state: {
       sorting,
       columnFilters,
       globalFilter,
       columnVisibility,
       rowSelection,
-      pagination,
+      pagination: {
+        pageIndex,
+        pageSize,
+      },
+    },
+    // Handle pagination changes properly
+    onPaginationChange: (updater) => {
+      if (typeof updater === 'function') {
+        const newPagination = updater({
+          pageIndex,
+          pageSize,
+        });
+        setPageIndex(newPagination.pageIndex);
+        setPageSize(newPagination.pageSize);
+      } else {
+        setPageIndex(updater.pageIndex);
+        setPageSize(updater.pageSize);
+      }
     },
   });
 
@@ -161,6 +181,26 @@ export function ProjectHistoryTable({
       </div>
     );
   }
+
+  // Safe handler for page size change
+  const handlePageSizeChange = (value: string) => {
+    const newSize = Number(value);
+    if (!isNaN(newSize)) {
+      // Calculate maximum page index based on new size to prevent out-of-bounds
+      const maxPageIndex = Math.max(0, Math.ceil(filteredProjects.length / newSize) - 1);
+      
+      // Set page index to 0 if the current index would be invalid with the new size
+      const newPageIndex = pageIndex > maxPageIndex ? 0 : pageIndex;
+      
+      setPageSize(newSize);
+      setPageIndex(newPageIndex);
+    }
+  };
+
+  // Calculate pagination information
+  const totalRows = table.getFilteredRowModel().rows.length;
+  const startRow = pageIndex * pageSize + 1;
+  const endRow = Math.min((pageIndex + 1) * pageSize, totalRows);
 
   return (
     <div className="w-full space-y-4">
@@ -220,7 +260,7 @@ export function ProjectHistoryTable({
       {/* Projects table */}
       {filteredProjects.length === 0 ? (
         <div className="text-center py-10 border rounded-lg">
-          <p className="text-muted-foreground mb-4">No projects found</p>
+          <p className="text-muted-foreground mb-4">No open projects found</p>
           {onRefresh && (
             <Button onClick={onRefresh} variant="outline" size="sm">
               Refresh
@@ -308,8 +348,8 @@ export function ProjectHistoryTable({
               Rows per page:
             </Label>
             <Select
-              value={table.getState().pagination.pageSize.toString()}
-              onValueChange={(value) => table.setPageSize(Number(value))}
+              value={pageSize.toString()}
+              onValueChange={handlePageSizeChange}
             >
               <SelectTrigger className="w-fit">
                 <SelectValue placeholder="Select number" />
@@ -322,11 +362,14 @@ export function ProjectHistoryTable({
               </SelectContent>
             </Select>
           </div>
-          <div className="text-sm text-muted-foreground flex-1 text-right">
-            {table.getFilteredRowModel().rows.length} of {table.getRowCount()} row(s)
+          <div className="text-sm text-muted-foreground flex-1 text-center">
+            {totalRows > 0 
+              ? `Showing ${startRow} to ${endRow} of ${totalRows} row${totalRows !== 1 ? 's' : ''}`
+              : 'No rows to display'}
           </div>
-          <div className="space-x-2">
+          <div className="space-x-2 flex items-center">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => table.previousPage()}
@@ -334,7 +377,12 @@ export function ProjectHistoryTable({
             >
               Previous
             </Button>
+            <span className="text-sm px-2">
+              Page {table.getState().pagination.pageIndex + 1} of{' '}
+              {table.getPageCount() || 1}
+            </span>
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => table.nextPage()}

@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, AlertTriangle, CheckCircle, ArrowRight, ArrowDownToLine, Banknote, CheckSquare, ClipboardList, FileText, Receipt, ShieldCheck, Wrench } from "lucide-react";
 import { 
   Tooltip,
@@ -179,62 +178,61 @@ const ProjectProgress: React.FC<ProjectProgressProps> = ({ projectId }) => {
           />
         </div>
         
-        <ScrollArea className="h-48 rounded-md border p-4">
-          <div className="space-y-4">
-            {documentOrder.map((docType, index) => {
-              const isCompleted = progress.completedDocTypes.includes(docType);
-              const isNext = !isCompleted && 
-                index === progress.completedDocTypes.length;
-                
-              return (
-                <TooltipProvider key={docType}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div 
-                        className={cn(
-                          "flex items-center p-2 rounded-md relative border",
-                          isCompleted 
-                            ? "bg-primary/10 border-primary/20" 
-                            : isNext 
-                              ? "bg-secondary/20 border-secondary/30" 
-                              : "bg-muted border-muted/50"
-                        )}
-                      >
-                        <div className="flex-shrink-0 mr-3 text-center w-8">
-                          {docTypeIcons[docType]}
-                        </div>
-                        <div className="flex-grow">
-                          <p className={cn(
-                            "font-medium",
-                            isCompleted 
-                              ? "text-primary" 
-                              : isNext 
-                                ? "text-secondary-foreground" 
-                                : "text-muted-foreground"
-                          )}>
-                            {docType}
-                          </p>
-                        </div>
-                        <div className="flex-shrink-0">
-                          {isCompleted ? (
-                            <CheckCircle className="h-5 w-5 text-primary" />
-                          ) : isNext ? (
-                            <ArrowRight className="h-5 w-5 text-secondary animate-pulse" />
-                          ) : null}
-                        </div>
+        {/* Replaced ScrollArea with a regular div */}
+        <div className="space-y-2 rounded-md border p-4">
+          {documentOrder.map((docType, index) => {
+            const isCompleted = progress.completedDocTypes.includes(docType);
+            const isNext = !isCompleted && 
+              index === progress.completedDocTypes.length;
+              
+            return (
+              <TooltipProvider key={docType}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div 
+                      className={cn(
+                        "flex items-center p-2 rounded-md relative border",
+                        isCompleted 
+                          ? "bg-primary/10 border-primary/20" 
+                          : isNext 
+                            ? "bg-secondary/20 border-secondary/30" 
+                            : "bg-muted border-muted/50"
+                      )}
+                    >
+                      <div className="flex-shrink-0 mr-3 text-center w-8">
+                        {docTypeIcons[docType]}
                       </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {isCompleted ? `Completed - Document uploaded` : 
-                       isNext ? `Next recommended document to upload` : 
-                       `Pending document`}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              );
-            })}
-          </div>
-        </ScrollArea>
+                      <div className="flex-grow">
+                        <p className={cn(
+                          "font-medium",
+                          isCompleted 
+                            ? "text-primary" 
+                            : isNext 
+                              ? "text-secondary-foreground" 
+                              : "text-muted-foreground"
+                        )}>
+                          {docType}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0">
+                        {isCompleted ? (
+                          <CheckCircle className="h-5 w-5 text-green-500" />
+                        ) : isNext ? (
+                          <ArrowRight className="h-5 w-5 text-secondary animate-pulse" />
+                        ) : null}
+                      </div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {isCompleted ? `Completed - Document uploaded` : 
+                     isNext ? `Next recommended document to upload` : 
+                     `Pending document`}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          })}
+        </div>
       </CardContent>
     </Card>
   );

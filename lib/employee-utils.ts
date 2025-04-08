@@ -188,3 +188,82 @@ export const deleteEmployeeDocument = async (merchantCode: string, employeeId: s
     console.error("Error deleting document:", error);
   }
 };
+
+export const updateEmployeeDocumentExpiry = async (
+  merchantCode: string,
+  employeeId: string,
+  documentId: string,
+  expiryDate: Date
+): Promise<void> => {
+  try {
+    const docRef = doc(
+      db,
+      "merchants",
+      merchantCode,
+      "employees",
+      employeeId,
+      "documents",
+      documentId
+    );
+    
+    // Convert Date to ISO string for storage
+    await updateDoc(docRef, {
+      expiryDate: expiryDate.toISOString()
+    });
+    
+    console.log("Document expiry date updated successfully");
+  } catch (error) {
+    console.error("Error updating document expiry date:", error);
+    throw error;
+  }
+};
+
+/**
+ * Modified version of uploadEmployeeDocument that includes optional expiryDate
+ * @param merchantCode The merchant code
+ * @param employeeId The employee ID
+ * @param file The file to upload
+ * @param docType The document type
+ * @param expiryDate Optional expiry date
+ * @returns The uploaded document data
+ */
+export const uploadEmployeeDocumentWithExpiry = async (
+  merchantCode: string,
+  employeeId: string,
+  file: File,
+  docType: string,
+  expiryDate?: Date
+) => {
+  try {
+    // Use your existing uploadEmployeeDocument logic here
+    const uploadedDoc = await uploadEmployeeDocument(merchantCode, employeeId, file, docType);
+    
+    // If expiry date is provided, update the document
+    if (expiryDate && uploadedDoc) {
+      const docRef = doc(
+        db,
+        "merchants",
+        merchantCode,
+        "employees",
+        employeeId,
+        "documents",
+        uploadedDoc.id
+      );
+      
+      await updateDoc(docRef, {
+        expiryDate: expiryDate.toISOString()
+      });
+      
+      // Return the updated document with the expiry date
+      return {
+        ...uploadedDoc,
+        expiryDate: expiryDate.toISOString()
+      };
+    }
+    
+    return uploadedDoc;
+  } catch (error) {
+    console.error("Error uploading document with expiry:", error);
+    throw error;
+  }
+};

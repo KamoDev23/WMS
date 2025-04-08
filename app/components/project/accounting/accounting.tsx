@@ -1,11 +1,13 @@
 "use client";
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, getDocs, updateDoc, doc as getDocRef } from "firebase/firestore";
-import { db } from "@/firebase/firebase-config";
-import { DollarSign, FileText, RotateCcw, CheckCircle, Loader2, Edit2 } from "lucide-react";
+import { collection, getDocs, updateDoc, doc as getDocRef, addDoc, Timestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "@/firebase/firebase-config";
+import { DollarSign, FileText, RotateCcw, CheckCircle, Loader2, Edit2, Plus } from "lucide-react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { AccountingStatsGrid } from "../../customs/accounting-stats-grid";
 import {
   Dialog,
@@ -18,7 +20,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/auth-context";
-import { fetchAccountingDocuments, updateAccountingDocumentAmount } from "@/lib/fetch-accounting-docs";
+import { fetchAccountingDocuments, updateAccountingDocumentAmount } from "@/lib/fetch-accounting-docs"; 
+import { toast } from "sonner";
+import QuoteCreatorButton from "./quote-creator-button";
+import QuoteCreator from "./quote-creator-interface";
 
 export interface AccountingDocument {
   id: string;
@@ -47,8 +52,6 @@ interface AccountingSectionProps {
 }
 
 export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId }) => {
-
-  
   const { user } = useAuth();
   const [merchantCode, setMerchantCode] = useState<string | null>(null);
 
@@ -57,7 +60,12 @@ export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId 
   const [error, setError] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<string>("All");
 
-  // New states for editing a document amount
+  // Quote creator states
+  const [showQuoteCreator, setShowQuoteCreator] = useState<boolean>(false);
+  const [companyData, setCompanyData] = useState<any>(null);
+  const [vehicleData, setVehicleData] = useState<any>(null);
+
+  // Edit dialog states
   const [showEditDialog, setShowEditDialog] = useState<boolean>(false);
   const [docToEdit, setDocToEdit] = useState<AccountingDocument | null>(null);
   const [editAmount, setEditAmount] = useState<string>("");
@@ -85,6 +93,39 @@ export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId 
       // Fetch accounting documents for the merchant's project
       const fetchedDocs = await fetchAccountingDocuments(userData.merchantCode, projectId);
       setDocs(fetchedDocs);
+      
+      // Fetch company profile for the quote creator
+      const profileSnapshot = await getDocs(collection(db, "merchants", userData.merchantCode, "profile"));
+      if (!profileSnapshot.empty) {
+        const profileData = profileSnapshot.docs[0].data();
+        setCompanyData({
+          name: profileData.companyName || '',
+          address: profileData.address || '',
+          city: profileData.city || '',
+          postalCode: profileData.postalCode || '',
+          email: profileData.companyEmail || '',
+          phone: profileData.phoneNumber || '',
+          vatNumber: profileData.vatNumber || '',
+          logoUrl: profileData.logoUrl || '',
+        });
+      }
+      
+      // Fetch vehicle data for the project
+      const projectSnapshot = await getDocs(collection(db, "merchants", userData.merchantCode, "projects"));
+      const projectDoc = projectSnapshot.docs.find(doc => doc.id === projectId);
+      if (projectDoc) {
+        const projectData = projectDoc.data();
+        if (projectData.vehicle) {
+          setVehicleData({
+            registration: projectData.vehicle.registration || '',
+            make: projectData.vehicle.make || '',
+            model: projectData.vehicle.model || '',
+            year: projectData.vehicle.year || '',
+            mileage: projectData.vehicle.mileage || '',
+            vin: projectData.vehicle.vin || '',
+          });
+        }
+      }
     } catch (error) {
       console.error("Error fetching documents:", error);
       setError("Failed to load documents. Please try again later.");
@@ -93,10 +134,9 @@ export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId 
     }
   };
   
-
   useEffect(() => {
     fetchDocuments();
-  }, [projectId]);
+  }, [projectId, user]);
 
   // Calculations:
   const estimatedExpenditure = useMemo(() => {
@@ -193,20 +233,111 @@ export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId 
         )
       );
   
-      console.log("Document amount updated successfully");
+      toast.success("Document amount updated successfully");
     } catch (error) {
       console.error("Error updating document amount:", error);
+      toast.error("Failed to update document amount");
     } finally {
       setShowEditDialog(false);
       setDocToEdit(null);
       setEditAmount("");
     }
   };
+
+  // Handle saving a quote
+  const handleSaveQuote = async (quoteData: any, asDraft: boolean) => {
+    if (!merchantCode) return;
+    
+    try {
+      // Generate a random filename for the PDF
+      const timestamp = Date.now();
+      const filename = `Quote_${quoteData.quoteNumber}_${timestamp}.pdf`;
+      
+      // In a real app, you'd generate a PDF from the quote data
+      // For demo purposes, we'll create a placeholder PDF
+      const pdfBlob = new Blob(['Placeholder for Quote PDF'], { type: 'application/pdf' });
+      
+      // Upload PDF to Firebase Storage
+      const storageRef = ref(storage, `merchants/${merchantCode}/projects/${projectId}/documents/${filename}`);
+      await uploadBytes(storageRef, pdfBlob);
+      const pdfUrl = await getDownloadURL(storageRef);
+      
+      // Save document reference to Firestore
+      const docRef = collection(db, "merchants", merchantCode, "projects", projectId, "documents");
+      const docType = asDraft ? "Supplier Quote" : "Supplier Invoice";
+      
+      await addDoc(docRef, {
+        fileName: filename,
+        url: pdfUrl,
+        docType: docType,
+        uploadedAt: Timestamp.now(),
+        projectId: projectId,
+        amount: quoteData.total,
+        // Store the quote data for future editing
+        quoteData: JSON.stringify(quoteData),
+      });
+      
+      // Refresh documents list
+      fetchDocuments();
+      
+      toast.success(asDraft ? "Quote saved as draft" : "Quote created and saved successfully");
+      return true;
+    } catch (error) {
+      console.error("Error saving quote:", error);
+      toast.error("Failed to save quote");
+      return false;
+    }
+  };
   
+  // Handle converting a quote to an invoice
+  const handleConvertToInvoice = async (quoteData: any) => {
+    if (!merchantCode) return;
+    
+    try {
+      // Similar process to saving a quote, but mark as invoice
+      const timestamp = Date.now();
+      const filename = `Invoice_${quoteData.quoteNumber}_${timestamp}.pdf`;
+      
+      // Create a placeholder PDF
+      const pdfBlob = new Blob(['Placeholder for Invoice PDF'], { type: 'application/pdf' });
+      
+      // Upload PDF to Firebase Storage
+      const storageRef = ref(storage, `merchants/${merchantCode}/projects/${projectId}/documents/${filename}`);
+      await uploadBytes(storageRef, pdfBlob);
+      const pdfUrl = await getDownloadURL(storageRef);
+      
+      // Save document reference to Firestore
+      const docRef = collection(db, "merchants", merchantCode, "projects", projectId, "documents");
+      
+      await addDoc(docRef, {
+        fileName: filename,
+        url: pdfUrl,
+        docType: "Supplier Invoice",
+        uploadedAt: Timestamp.now(),
+        projectId: projectId,
+        amount: quoteData.total,
+        // Store the invoice data
+        quoteData: JSON.stringify({...quoteData, status: 'invoice'}),
+      });
+      
+      // Refresh documents list
+      fetchDocuments();
+      
+      toast.success("Quote converted to invoice successfully");
+      return true;
+    } catch (error) {
+      console.error("Error converting quote to invoice:", error);
+      toast.error("Failed to convert quote to invoice");
+      return false;
+    }
+  };
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold">Accounting</h2>
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold">Accounting</h2>
+        <QuoteCreatorButton onClick={() => setShowQuoteCreator(true)} />
+      </div>
 
       {/* Totals using AccountingStatsGrid */}
       <AccountingStatsGrid stats={accountingStats} />
@@ -248,27 +379,30 @@ export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId 
         ) : (
           filteredDocs.map((doc, index) => (
             <Card key={doc.id} className="p-4 mb-4 relative">
-              {/* Edit Icon positioned in the top left */}
-              {/* <button
-                onClick={() => openEditDialog(doc)}
-                className="absolute top-2 right-2 p-1 rounded-full hover:bg-gray-200"
-                aria-label="Edit document amount"
-              >
-                <Edit2 className="h-4 w-4" />
-              </button> */}
-              <div className="flex flex-col space-y-2">
-                <div>
-                  
-                  <p className="text-sm">
-                    {doc.fileName}  
-                  </p>
-                  <p className="text-xs text-muted-foreground">{doc.docType}</p>
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col space-y-2">
+                  <div>
+                    <p className="text-sm">
+                      {doc.fileName}  
+                    </p>
+                    <p className="text-xs text-muted-foreground">{doc.docType}</p>
+                  </div>
+                  <div>
+                    <Label className="whitespace-nowrap">
+                      Amount: {formatCurrency(doc.amount !== undefined ? doc.amount : 0)}
+                    </Label>
+                  </div>
                 </div>
-                <div>
-                  <Label className="whitespace-nowrap">
-                    Amount: {formatCurrency(doc.amount !== undefined ? doc.amount : 0)}
-                  </Label>
-                </div>
+                
+                {/* Add edit button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => openEditDialog(doc)}
+                >
+                  <Edit2 className="h-4 w-4 mr-2" />
+                  Edit Amount
+                </Button>
               </div>
             </Card>
           ))
@@ -288,7 +422,7 @@ export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId 
             <div className="mb-4">
               <iframe
                 src={docToEdit.url}
-                className="w-full h-[800px] border rounded"
+                className="w-full h-[600px] border rounded"
                 title="Document Preview"
               />
             </div>
@@ -304,18 +438,26 @@ export const AccountingSection: React.FC<AccountingSectionProps> = ({ projectId 
             />
           </div>
           <DialogFooter>
-            <button
-              onClick={handleEditSave}
-              className="rounded bg-blue-500 px-4 py-2 text-white"
-            >
+            <Button onClick={handleEditSave} variant="default">
               Save Amount
-            </button>
-            <DialogClose asChild>
-              <button className="rounded border px-4 py-2">Cancel</button>
-            </DialogClose>
+            </Button>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Quote Creator Dialog */}
+      <QuoteCreator
+        open={showQuoteCreator}
+        onOpenChange={setShowQuoteCreator}
+        projectId={projectId}
+        companyData={companyData}
+        vehicleData={vehicleData}
+        onSave={handleSaveQuote}
+        onConvertToInvoice={handleConvertToInvoice}
+      />
     </div>
   );
 };

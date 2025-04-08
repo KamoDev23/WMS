@@ -69,6 +69,7 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { useCustomToast } from "../../customs/toast";
 import { Separator } from "@/components/ui/separator";
+import FullscreenDocumentViewer from "../../business/components/fullscreen-document-viewer";
 
 
 // ----- Types and Utilities -----
@@ -706,6 +707,27 @@ const UploadDocumentsSection: React.FC<{ projectId: string }> = ({ projectId }) 
   const [docToEdit, setDocToEdit] = useState<UploadedDocument | null>(null);
   const [editAmount, setEditAmount] = useState<string>("");
 
+  const [viewingDocumentUrl, setViewingDocumentUrl] = useState<string | null>(null);
+const [viewingDocumentName, setViewingDocumentName] = useState<string>("");
+const [fullscreenViewerOpen, setFullscreenViewerOpen] = useState(false);
+
+// Replace the handleView function with this new version
+const handleView = (doc: UploadedDocument) => {
+  if (!merchantCode) return;
+  
+  const storageRef = ref(storage, `merchants/${merchantCode}/projects/${projectId}/documents/${doc.fileName}`);
+  getDownloadURL(storageRef)
+    .then((url) => {
+      setViewingDocumentUrl(url);
+      setViewingDocumentName(doc.fileName);
+      setFullscreenViewerOpen(true);
+    })
+    .catch((error) => {
+      console.error("Error getting download URL:", error);
+      showToast({ message: "Error opening document" });
+    });
+};
+
   // --- Handlers for Upload, Edit, Delete, Update, Download ---
 
   const handleUpload = async () => {
@@ -913,16 +935,16 @@ const UploadDocumentsSection: React.FC<{ projectId: string }> = ({ projectId }) 
     }
   };
 
-  const handleView = (doc: UploadedDocument) => {
-    if (!merchantCode) return;
-    const storageRef = ref(storage, `merchants/${merchantCode}/projects/${projectId}/documents/${doc.fileName}`);
-    getDownloadURL(storageRef)
-      .then((url) => window.open(url, "_blank"))
-      .catch((error) => {
-        console.error("Error getting download URL:", error);
-        showToast({ message: "Error opening document" });
-      });
-  };
+  // const handleView = (doc: UploadedDocument) => {
+  //   if (!merchantCode) return;
+  //   const storageRef = ref(storage, `merchants/${merchantCode}/projects/${projectId}/documents/${doc.fileName}`);
+  //   getDownloadURL(storageRef)
+  //     .then((url) => window.open(url, "_blank"))
+  //     .catch((error) => {
+  //       console.error("Error getting download URL:", error);
+  //       showToast({ message: "Error opening document" });
+  //     });
+  // };
 
   const handleDownloadSingle = async (doc: UploadedDocument) => {
     if (!merchantCode) return;
@@ -1069,6 +1091,15 @@ const UploadDocumentsSection: React.FC<{ projectId: string }> = ({ projectId }) 
         onSave={handleEditSave}
         loading={loading}
       />
+
+      {viewingDocumentUrl && (
+        <FullscreenDocumentViewer
+          open={fullscreenViewerOpen}
+          onOpenChange={setFullscreenViewerOpen}
+          documentUrl={viewingDocumentUrl}
+          documentName={viewingDocumentName}
+        />
+      )}
     </div>
   );
 };

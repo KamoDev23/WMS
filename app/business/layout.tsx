@@ -24,7 +24,7 @@ export default function BusinessLayout({
       </header>
 
       {/* Two-column layout: Sidebar and Main Content */}
-      <div className="md:grid md:grid-cols-[440px_1fr]">
+      <div className="md:grid md:grid-cols-[380px_1fr]">
         <aside className="  hidden md:block  ">
           <SidebarNav />
         </aside>
